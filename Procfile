@@ -1,1 +1,1 @@
-web: gunicorn inapps.wsgi --workers=3 --timeout=90
+web: gunicorn capig_form.wsgi --workers=3 --timeout=90
