@@ -1,0 +1,1 @@
+{"form_views_head": "\ufefffrom django.shortcuts import render, redirect\nfrom django.contrib import messages\nfrom django.views.decorators.http import require_http_methods\nfrom django.views.decorators.http import require_GET\nfr"}

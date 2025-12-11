@@ -1,0 +1,218 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="form-header">
+    <h2>Registrar Ventas del Afiliado</h2>
+    <p>Busca por RUC y registra el comparativo de ventas del año.</p>
+</div>
+
+<div class="form-content">
+    <form method="POST">
+        {% csrf_token %}
+        <input type="hidden" name="security_code" value="">
+        <input type="text" name="ruc" placeholder="Ingrese RUC" class="form-control mb-3" value="{{ ruc }}" required>
+
+        {% if no_encontrado %}
+            <div class="alert alert-danger">No se encontró el afiliado.</div>
+        {% endif %}
+
+        {% if afiliado %}
+            <div class="card p-3 text-start mb-3">
+                <p><strong>Razón Social:</strong> {{ afiliado.razon_social }}</p>
+                <p><strong>Ciudad:</strong> {{ afiliado.ciudad }}</p>
+                <p><strong>Fecha de Afiliación:</strong> {{ afiliado.fecha_afiliacion }}</p>
+
+                {% with selected_registro=registro_ventas %}
+                <label for="registro_ventas" class="form-label mt-2">¿Registró ventas este año?</label>
+                <select name="registro_ventas" id="registro_ventas" class="form-select" required onchange="toggleCamposVentas(this.value)">
+                    <option value="">Seleccione</option>
+                    {% with registro_lower=selected_registro|default:''|lower %}
+                    <option value="Sí" {% if registro_lower == "sí" or registro_lower == "si" or registro_lower == "s" or registro_lower == "s�" %}selected{% endif %}>Sí</option>
+                    <option value="No" {% if registro_lower == "no" %}selected{% endif %}>No</option>
+                    {% endwith %}
+                </select>
+                {% endwith %}
+
+                <div id="ventas_condicional" class="mt-3" style="display: none;">
+                    <div id="ventas-bloques" data-count="{{ ventas_data|length }}">
+                        {% for venta in ventas_data %}
+                            {% with idx=forloop.counter0 %}
+                            <div class="border rounded p-3 mt-3 venta-bloque" data-index="{{ idx }}">
+                                <div class="row g-3 align-items-end">
+                                    <div class="col-md-4">
+                                        <label class="form-label" for="venta_anio_{{ idx }}">Año</label>
+                                        <select class="form-select anio-select" name="ventas[{{ idx }}][anio]" id="venta_anio_{{ idx }}" data-selected="{{ venta.anio }}" required>
+                                            <option value="">Seleccione</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label" for="venta_comparativo_{{ idx }}">¿Cómo compara sus ventas con el año anterior?</label>
+                                        <select name="ventas[{{ idx }}][comparativo]" id="venta_comparativo_{{ idx }}" class="form-select">
+                                            <option value="">Seleccione</option>
+                                            <option value="Aumentó" {% if venta.comparativo == "Aumentó" %}selected{% endif %}>Aumentó</option>
+                                            <option value="Igual" {% if venta.comparativo == "Igual" %}selected{% endif %}>Igual</option>
+                                            <option value="Disminuyó" {% if venta.comparativo == "Disminuyó" %}selected{% endif %}>Disminuyó</option>
+                                            <option value="No reporta" {% if venta.comparativo == "No reporta" %}selected{% endif %}>No reporta</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <label class="form-label" for="venta_estimado_{{ idx }}">Total estimado de ventas este año</label>
+                                        <input type="number" name="ventas[{{ idx }}][ventas_estimadas]" id="venta_estimado_{{ idx }}" class="form-control" min="0" value="{{ venta.ventas_estimadas }}">
+                                    </div>
+                                </div>
+                            </div>
+                            {% endwith %}
+                        {% endfor %}
+                    </div>
+
+                    <button type="button" id="agregar-venta" class="btn btn-outline-primary mt-3">
+                        <span class="spinner-border spinner-border-sm me-2 d-none" role="status" aria-hidden="true"></span>
+                        Registrar otra venta anual
+                    </button>
+                </div>
+
+                <label for="observaciones" class="form-label mt-3">Observaciones adicionales (opcional)</label>
+                <textarea name="observaciones" id="observaciones" class="form-control" rows="3">{{ observaciones }}</textarea>
+
+                <button type="submit" class="btn btn-success mt-4" data-require-security="true">Guardar</button>
+            </div>
+
+            <template id="venta-template">
+                <div class="border rounded p-3 mt-3 venta-bloque" data-index="__index__">
+                    <div class="row g-3 align-items-end">
+                        <div class="col-md-4">
+                            <label class="form-label" data-for-field="anio">Año</label>
+                            <select class="form-select anio-select" data-field-name="anio" data-selected="" required>
+                                <option value="">Seleccione</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label" data-for-field="comparativo">¿Cómo compara sus ventas con el año anterior?</label>
+                            <select class="form-select" data-field-name="comparativo">
+                                <option value="">Seleccione</option>
+                                <option value="Aumentó">Aumentó</option>
+                                <option value="Igual">Igual</option>
+                                <option value="Disminuyó">Disminuyó</option>
+                                <option value="No reporta">No reporta</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label" data-for-field="ventas_estimadas">Total estimado de ventas este año</label>
+                            <input type="number" class="form-control" min="0" data-field-name="ventas_estimadas">
+                        </div>
+                    </div>
+                </div>
+            </template>
+        {% else %}
+            <button type="submit" class="btn btn-primary">Buscar</button>
+        {% endif %}
+    </form>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  (function() {
+    const campos = document.getElementById("ventas_condicional");
+    const registroSelect = document.getElementById("registro_ventas");
+    const bloquesContainer = document.getElementById("ventas-bloques");
+    const template = document.getElementById("venta-template");
+    const agregarBtn = document.getElementById("agregar-venta");
+    const spinner = agregarBtn ? agregarBtn.querySelector(".spinner-border") : null;
+    const YEAR_MIN = 2000;
+
+    function normalizar(valor) {
+      return (valor || "").toString().trim().toLowerCase();
+    }
+
+    window.toggleCamposVentas = function(valor) {
+      if (!campos) return;
+      const mostrar = ["si", "sí", "s", "s�"].includes(normalizar(valor));
+      campos.style.display = mostrar ? "block" : "none";
+    };
+
+    function populateYearOptions(select) {
+      if (!select) return;
+      const seleccionado = select.dataset.selected || "";
+      const currentYear = new Date().getFullYear();
+      let options = '<option value="">Seleccione</option>';
+      for (let year = currentYear; year >= YEAR_MIN; year--) {
+        options += `<option value="${year}">${year}</option>`;
+      }
+      if (seleccionado && Number(seleccionado) < YEAR_MIN) {
+        options += `<option value="${seleccionado}">${seleccionado}</option>`;
+      }
+      select.innerHTML = options;
+      if (seleccionado) {
+        select.value = seleccionado;
+      }
+    }
+
+    function hydrateYearSelects() {
+      document.querySelectorAll(".anio-select").forEach(populateYearOptions);
+    }
+
+    function updateContainerCount() {
+      if (!bloquesContainer) return 0;
+      const count = bloquesContainer.querySelectorAll(".venta-bloque").length;
+      bloquesContainer.dataset.count = count;
+      return count;
+    }
+
+    function agregarVenta() {
+      if (!template || !bloquesContainer) {
+        throw new Error("No hay plantilla para agregar ventas.");
+      }
+      const nextIndex = updateContainerCount();
+      const fragment = template.content.cloneNode(true);
+      fragment.querySelectorAll("[data-field-name]").forEach((fieldEl) => {
+        const field = fieldEl.dataset.fieldName;
+        const newId = `${field}_${nextIndex}`;
+        fieldEl.name = `ventas[${nextIndex}][${field}]`;
+        fieldEl.id = newId;
+        if (fieldEl.tagName === "INPUT") {
+          fieldEl.value = "";
+        }
+        if (field === "anio") {
+          fieldEl.dataset.selected = "";
+        }
+      });
+      fragment.querySelectorAll("[data-for-field]").forEach((labelEl) => {
+        const field = labelEl.dataset.forField;
+        labelEl.htmlFor = `${field}_${nextIndex}`;
+      });
+      bloquesContainer.appendChild(fragment);
+      updateContainerCount();
+      hydrateYearSelects();
+    }
+
+    if (agregarBtn) {
+      agregarBtn.addEventListener("click", () => {
+        if (spinner) spinner.classList.remove("d-none");
+        agregarBtn.disabled = true;
+        try {
+          agregarVenta();
+        } catch (error) {
+          console.error("Error al duplicar bloque de venta:", error);
+          if (window.Swal) {
+            Swal.fire({
+              icon: "error",
+              title: "No se pudo agregar el bloque",
+              text: "Intenta nuevamente en unos segundos.",
+            });
+          }
+        } finally {
+          if (spinner) spinner.classList.add("d-none");
+          agregarBtn.disabled = false;
+        }
+      });
+    }
+
+    hydrateYearSelects();
+    updateContainerCount();
+    if (registroSelect) {
+      toggleCamposVentas(registroSelect.value);
+    }
+  })();
+</script>
+{% endblock %}

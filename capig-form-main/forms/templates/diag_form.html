@@ -1,0 +1,147 @@
+{% extends "layout.html" %}
+
+{% block title %}Formulario de Diagnóstico - CAPIG{% endblock %}
+
+{% block content %}
+<div class="form-header">
+    <h2>Formulario de Diagnóstico</h2>
+    <p>Complete la información requerida para el diagnóstico</p>
+</div>
+
+<div class="form-content">
+    {% if messages %}
+        {% for message in messages %}
+        <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+        {% endfor %}
+    {% endif %}
+    
+    <form method="POST" action="{% url 'forms:diag_form' %}" id="diagForm">
+        {% csrf_token %}
+        
+        <!-- Razón Social -->
+        <div class="mb-4">
+            <label for="razon_social" class="form-label">Razón Social <span class="text-danger">*</span></label>
+            <select class="form-select" id="razon_social" name="razon_social" required>
+                <option value="">Seleccione una razón social...</option>
+                {% for empresa in empresas %}
+                <option value="{{ empresa }}">{{ empresa }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        
+        <!-- Tipo de Diagnóstico -->
+        <div class="mb-4">
+            <label for="tipo_diagnostico" class="form-label">Tipo de Diagnóstico <span class="text-danger">*</span></label>
+            <select class="form-select" id="tipo_diagnostico" name="tipo_diagnostico" required>
+                <option value="">Seleccione un tipo...</option>
+                <option value="legal">Legal</option>
+                <option value="lean">Lean</option>
+                <option value="estrategia">Estrategia</option>
+                <option value="ambiente">Ambiente</option>
+                <option value="rrhh">RRHH</option>
+            </select>
+        </div>
+        
+        <!-- Subtipo de Diagnóstico (Solo para Legal) -->
+        <div class="mb-4" id="subtipo_container" style="display: none;">
+            <label for="subtipo_diagnostico" class="form-label">Subtipo de Diagnóstico <span class="text-danger">*</span></label>
+            <select class="form-select" id="subtipo_diagnostico" name="subtipo_diagnostico">
+                <option value="">Seleccione un subtipo...</option>
+                <option value="laboral">Laboral</option>
+                <option value="societario">Societario</option>
+                <option value="propiedad_intelectual">Propiedad Intelectual</option>
+                <option value="otros">Otros</option>
+            </select>
+        </div>
+        
+        <!-- Campo de texto para "Otros" -->
+        <div class="mb-4" id="otros_container" style="display: none;">
+            <label for="otros_subtipo" class="form-label">Especifique el subtipo <span class="text-danger">*</span></label>
+            <input type="text" class="form-control" id="otros_subtipo" name="otros_subtipo" placeholder="Ingrese el subtipo de diagnóstico">
+        </div>
+        
+        <!-- Se Diagnosticó -->
+        <div class="mb-4">
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="se_diagnostico" name="se_diagnostico" value="true">
+                <label class="form-check-label" for="se_diagnostico">
+                    Se realizó el diagnóstico
+                </label>
+            </div>
+        </div>
+        
+        <!-- Botón de Envío -->
+        <div class="text-center">
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-send"></i> Enviar Diagnóstico
+            </button>
+        </div>
+    </form>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    $(document).ready(function() {
+        // Inicializar Select2
+        $('#razon_social').select2({
+            theme: 'bootstrap-5',
+            placeholder: 'Buscar razón social...',
+            allowClear: true,
+            width: '100%'
+        });
+        
+        // Mostrar/ocultar subtipo según tipo de diagnóstico
+        $('#tipo_diagnostico').on('change', function() {
+            const tipoSeleccionado = $(this).val();
+            
+            if (tipoSeleccionado === 'legal') {
+                $('#subtipo_container').slideDown();
+                $('#subtipo_diagnostico').attr('required', true);
+            } else {
+                $('#subtipo_container').slideUp();
+                $('#subtipo_diagnostico').attr('required', false).val('');
+                $('#otros_container').slideUp();
+                $('#otros_subtipo').attr('required', false).val('');
+            }
+        });
+        
+        // Mostrar/ocultar campo de texto para "Otros"
+        $('#subtipo_diagnostico').on('change', function() {
+            const subtipoSeleccionado = $(this).val();
+            
+            if (subtipoSeleccionado === 'otros') {
+                $('#otros_container').slideDown();
+                $('#otros_subtipo').attr('required', true);
+            } else {
+                $('#otros_container').slideUp();
+                $('#otros_subtipo').attr('required', false).val('');
+            }
+        });
+        
+        // Validación del formulario
+        $('#diagForm').on('submit', function(e) {
+            const tipoDiagnostico = $('#tipo_diagnostico').val();
+            const subtipoDiagnostico = $('#subtipo_diagnostico').val();
+            const otrosSubtipo = $('#otros_subtipo').val();
+            
+            // Validar que si es legal, tenga subtipo
+            if (tipoDiagnostico === 'legal' && !subtipoDiagnostico) {
+                e.preventDefault();
+                alert('Por favor, seleccione un subtipo de diagnóstico.');
+                return false;
+            }
+            
+            // Validar que si seleccionó "otros", tenga el texto
+            if (subtipoDiagnostico === 'otros' && !otrosSubtipo.trim()) {
+                e.preventDefault();
+                alert('Por favor, especifique el subtipo de diagnóstico.');
+                return false;
+            }
+        });
+    });
+</script>
+{% endblock %}

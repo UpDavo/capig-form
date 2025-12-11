@@ -1,0 +1,144 @@
+{% load static %}
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Inicio CAPIG</title>
+
+    <style>
+        body {
+            background: linear-gradient(135deg, #8aa8ff, #9e6bff);
+            height: 100vh;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: "Segoe UI", Arial;
+        }
+
+        .box {
+            background: #fff;
+            padding: 50px 40px;
+            width: 520px;
+            border-radius: 22px;
+            text-align: center;
+            box-shadow: 0 14px 40px rgba(0,0,0,0.18);
+            animation: fadeIn 0.7s ease;
+        }
+
+        /* Animaci??????n suave */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Logo */
+        .logo {
+            width: 180px;
+            margin-bottom: 20px;
+            filter: drop-shadow(0px 2px 3px rgba(0,0,0,0.2));
+        }
+
+        p {
+            font-size: 17px;
+            color: #444;
+            margin-bottom: 30px;
+        }
+
+        /* Botones */
+        a {
+            display: block;
+            padding: 14px;
+            margin-top: 15px;
+            border-radius: 12px;
+            text-decoration: none;
+            font-size: 18px;
+            transition: 0.25s;
+        }
+
+        .btn1 {
+            background: linear-gradient(#6d5bff, #916bff);
+            color: white;
+            font-weight: bold;
+        }
+        .btn1:hover {
+            transform: scale(1.03);
+            box-shadow: 0 4px 15px rgba(120,90,255,0.4);
+        }
+
+        .btn2 {
+            border: 2px solid #6d5bff;
+            color: #6d5bff;
+            background: white;
+            font-weight: bold;
+        }
+        .btn2:hover {
+            background: #f4f0ff;
+            transform: scale(1.03);
+            box-shadow: 0 4px 15px rgba(120,90,255,0.25);
+        }
+
+        .btn3 {
+            border: 2px solid #16a34a;
+            color: #15803d;
+            background: #e9f7ef;
+            font-weight: bold;
+        }
+        .btn3:hover {
+            background: #d3f0df;
+            transform: scale(1.03);
+            box-shadow: 0 4px 15px rgba(22,163,74,0.2);
+        }
+
+        .btn4 {
+            border: 2px solid #0891b2;
+            color: #0e7490;
+            background: #e0f7fb;
+            font-weight: bold;
+        }
+        .btn4:hover {
+            background: #c8eff7;
+            transform: scale(1.03);
+            box-shadow: 0 4px 15px rgba(8,145,178,0.2);
+        }
+
+        .btn5 {
+            border: 2px solid #d97706;
+            color: #b45309;
+            background: #fff7ed;
+            font-weight: bold;
+        }
+        .btn5:hover {
+            background: #ffedd5;
+            transform: scale(1.03);
+            box-shadow: 0 4px 15px rgba(217,119,6,0.2);
+        }
+
+        /* Para celulares */
+        @media(max-width: 600px) {
+            .box {
+                width: 85%;
+                padding: 40px 20px;
+            }
+            .logo {
+                width: 150px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="box">
+        <img src="{% static 'capig.webp' %}" class="logo" alt="CAPIG Logo">
+
+        <p>Selecciona el formulario que necesitas:</p>
+
+        <a href="/diagnostico/" class="btn1">Ir a Diagn&oacute;stico</a>
+        <a href="/capacitacion/" class="btn2">Ir a Capacitaci&oacute;n</a>
+        <a href="{% url 'forms:nuevo_afiliado' %}" class="btn5">Registro de afiliados</a>
+        <a href="{% url 'forms:estado_afiliado' %}" class="btn3">Estado del afiliado</a>
+        <a href="{% url 'forms:ventas_afiliado' %}" class="btn4">Ventas afiliado</a>
+    </div>
+</body>
+</html>

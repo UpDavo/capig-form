@@ -1,0 +1,108 @@
+{% extends "layout.html" %}
+
+{% load static %}
+{% block content %}
+<div style="max-height: 90vh; overflow-y: auto; padding-right: 10px;">
+<div class="container mt-5 mb-5">
+    <div class="p-4 rounded-4 shadow-sm" style="background-color: white;">
+        <h2 class="text-center text-primary fw-bold mb-3">Formulario de Registro</h2>
+        <p class="text-center mb-4 text-muted">Complete la informaci&oacute;n para registrar una nueva empresa afiliada.</p>
+
+        <form method="post" action="{% url 'forms:nuevo_afiliado' %}" data-require-security="true">
+            {% csrf_token %}
+            <input type="hidden" name="security_code" value="">
+
+            <div class="mb-3">
+                <label class="form-label">Raz&oacute;n Social</label>
+                <input type="text" name="razon_social" class="form-control" required>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">RUC</label>
+                <input type="text" name="ruc" class="form-control" required>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Ciudad</label>
+                <input type="text" name="ciudad" class="form-control" required>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Direcci&oacute;n</label>
+                <input type="text" name="direccion" class="form-control" required>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Tel&eacute;fono</label>
+                <input type="text" name="telefono" class="form-control" required>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Email</label>
+                <input type="email" name="email" class="form-control" required>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Representante Legal</label>
+                <input type="text" name="representante" class="form-control" required>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Cargo</label>
+                <input type="text" name="cargo" class="form-control" required>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">G&eacute;nero</label>
+                <select name="genero" class="form-select" required>
+                    <option value="">Seleccione una opci&oacute;n</option>
+                    <option value="Hombre">Hombre</option>
+                    <option value="Mujer">Mujer</option>
+                    <option value="Prefiero no decir">Prefiero no decir</option>
+                </select>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">N&uacute;mero de Colaboradores</label>
+                <input type="number" name="colaboradores" class="form-control" min="0" step="1" placeholder="Ingrese el n&uacute;mero de colaboradores">
+            </div>
+
+            <div class="mb-3">
+                <label for="sector" class="form-label">Sector</label>
+                <select class="form-select" id="sector" name="sector" required>
+                    <option value="">Seleccione un sector</option>
+                    {% for sector in sectores %}
+                        <option value="{{ sector }}">{{ sector }}</option>
+                    {% empty %}
+                        <option value="" disabled>No hay sectores disponibles</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="mb-3">
+                <label for="tamano" class="form-label">Tama&ntilde;o</label>
+                <select class="form-select" id="tamano" name="tamano" required>
+                    <option value="">Seleccione un tama&ntilde;o</option>
+                    <option value="MICRO">MICRO</option>
+                    <option value="PEQUE&Ntilde;A">PEQUE&Ntilde;A</option>
+                    <option value="MEDIANA">MEDIANA</option>
+                    <option value="GRANDE">GRANDE</option>
+                </select>
+            </div>
+
+            <div class="mb-4">
+                <label class="form-label">Estado</label>
+                <select name="estado" class="form-select" required>
+                    <option value="PAGADO">PAGADO</option>
+                    <option value="NO PAGADO">NO PAGADO</option>
+                </select>
+            </div>
+
+            <button type="submit" class="btn btn-primary w-100" style="background: linear-gradient(to right, #6d5bff, #916bff); border: none;" data-require-security="true">
+                Registrar
+            </button>
+        </form>
+    </div>
+</div>
+</div>
+{% endblock %}

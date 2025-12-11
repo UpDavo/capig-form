@@ -1,0 +1,123 @@
+{% extends "layout.html" %}
+
+{% block title %}Formulario de Capacitación - CAPIG{% endblock %}
+
+{% block content %}
+<div class="form-header">
+    <h2>Formulario de Capacitación</h2>
+    <p>Complete la información de la capacitación</p>
+</div>
+
+<div class="form-content">
+    {% if messages %}
+        {% for message in messages %}
+        <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+        {% endfor %}
+    {% endif %}
+    
+    <form method="POST" action="{% url 'forms:cap_form' %}" id="capForm">
+        {% csrf_token %}
+        
+        <!-- Razón Social -->
+        <div class="mb-4">
+            <label for="razon_social" class="form-label">Razón Social <span class="text-danger">*</span></label>
+            <select class="form-select" id="razon_social" name="razon_social" required>
+                <option value="">Seleccione una razón social...</option>
+                {% for empresa in empresas %}
+                <option value="{{ empresa }}">{{ empresa }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        
+        <!-- Nombre de la Capacitación -->
+        <div class="mb-4">
+            <label for="nombre_capacitacion" class="form-label">Nombre de la Capacitación <span class="text-danger">*</span></label>
+            <input type="text" class="form-control" id="nombre_capacitacion" name="nombre_capacitacion" placeholder="Ej: Liderazgo Empresarial" required>
+        </div>
+        
+        <!-- Tipo de Capacitación -->
+        <div class="mb-4">
+            <label for="tipo_capacitacion" class="form-label">Tipo de Capacitación <span class="text-danger">*</span></label>
+            <select class="form-select" id="tipo_capacitacion" name="tipo_capacitacion" required>
+                <option value="">Seleccione un tipo...</option>
+                <option value="financiera">Financiera</option>
+                <option value="liderazgo">Liderazgo</option>
+                <option value="tecnologia">Tecnología</option>
+                <option value="ventas">Ventas</option>
+                <option value="marketing">Marketing</option>
+                <option value="recursos_humanos">Recursos Humanos</option>
+                <option value="operaciones">Operaciones</option>
+                <option value="legal">Legal</option>
+                <option value="otra">Otra</option>
+            </select>
+        </div>
+        
+        <!-- Valor del Pago -->
+        <div class="mb-4">
+            <label for="valor_pago" class="form-label">Valor del Pago <span class="text-danger">*</span></label>
+            <div class="input-group">
+                <span class="input-group-text">$</span>
+                <input type="number" class="form-control" id="valor_pago" name="valor_pago" placeholder="0.00" step="0.01" min="0" required>
+            </div>
+            <small class="text-muted">Ingrese el monto sin puntos ni comas</small>
+        </div>
+        
+        <!-- Botón de Envío -->
+        <div class="text-center">
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-send"></i> Enviar Capacitación
+            </button>
+        </div>
+    </form>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    $(document).ready(function() {
+        // Inicializar Select2 para razón social
+        $('#razon_social').select2({
+            theme: 'bootstrap-5',
+            placeholder: 'Buscar razón social...',
+            allowClear: true,
+            width: '100%'
+        });
+        
+        // Formatear el valor del pago mientras se escribe
+        $('#valor_pago').on('input', function() {
+            let valor = $(this).val();
+            // Asegurar que solo se ingresen números y un punto decimal
+            valor = valor.replace(/[^0-9.]/g, '');
+            
+            // Evitar múltiples puntos decimales
+            const partes = valor.split('.');
+            if (partes.length > 2) {
+                valor = partes[0] + '.' + partes.slice(1).join('');
+            }
+            
+            $(this).val(valor);
+        });
+        
+        // Validación del formulario
+        $('#capForm').on('submit', function(e) {
+            const valorPago = parseFloat($('#valor_pago').val());
+            
+            if (isNaN(valorPago) || valorPago < 0) {
+                e.preventDefault();
+                alert('Por favor, ingrese un valor de pago válido.');
+                return false;
+            }
+            
+            if (valorPago === 0) {
+                if (!confirm('El valor del pago es $0.00. ¿Desea continuar?')) {
+                    e.preventDefault();
+                    return false;
+                }
+            }
+        });
+    });
+</script>
+{% endblock %}

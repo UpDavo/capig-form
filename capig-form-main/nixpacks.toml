@@ -1,0 +1,13 @@
+[phases.setup]
+nixPkgs = [
+  "gcc",
+  "mariadb-connector-c",
+  "postgresql_16",
+  "python39"
+]
+
+[healthcheck]
+path = "/health/"
+interval = 30
+timeout = 10
+retries = 3

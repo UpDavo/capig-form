@@ -1,0 +1,50 @@
+        if (!s) return "SIN CLASIFICAR";
+        if (s.indexOf("QUIM") !== -1) return "QUÍMICO";
+        if (s.indexOf("METAL") !== -1) return "METALMECÁNICO";
+        if (s.indexOf("ALIMENT") !== -1) return "ALIMENTOS";
+        if (s.indexOf("AGRIC") !== -1 || s.indexOf("AGROP") !== -1) return "AGRÍCOLA";
+        if (s.indexOf("MAQUIN") !== -1) return "MAQUINARIAS";
+        if (s.indexOf("CONST") !== -1) return "CONSTRUCCIÓN";
+        if (s.indexOf("TEXT") !== -1) return "TEXTIL";
+        if (s.indexOf("COME") !== -1 || s.indexOf("RETAIL") !== -1) return "COMERCIO";
+        return s;
+    }
+
+    function normalizeEstado(val) {
+        const e = (val || "").toString().trim().toUpperCase();
+        if (!e) return "DESCONOCIDO";
+
+        // Sinónimos de PAGADO
+        if (e === "ACTIVO" || e === "PAGADO" || (e.indexOf("PAG") !== -1 && e.indexOf("NO") === -1)) {
+            return "PAGADO";
+        }
+
+        // Sinónimos de NO PAGADO
+        if (e.indexOf("NO") !== -1 || e.indexOf("PEND") !== -1 || e.indexOf("INACTIVO") !== -1 || e === "INACTIVO" || e.indexOf("SUSPEND") !== -1 || e.indexOf("RETIR") !== -1) {
+            return "NO PAGADO";
+        }
+
+        return "DESCONOCIDO";
+    }
+
+    function parseMonto(val) {
+        if (!val) return 0;
+        let clean = val.toString().replace(/[$,\s]/g, "");
+        const m = parseFloat(clean);
+        return isNaN(m) ? 0 : m;
+    }
+
+    function parseEmpleados(val) {
+        if (!val) return 0;
+        const e = parseInt(val, 10);
+        return isNaN(e) ? 0 : e;
+    }
+
+    // -------------- Builder Principal --------------
+    function buildVentasDesempeno() {
+        Logger.log("[DASH4] Iniciando generación de tablas de desempeño...");
+
+        // Inicializar estructuras de datos
+        const empresas = new Map();
+        const añosSet = new Set();
+        const trimestresSet = new Set();
