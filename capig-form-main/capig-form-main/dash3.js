@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Tablas para el dashboard de porcentaje de gerentes por genero y tamano.
  * Ejecutar refreshDashboardGenero() para regenerar los pre-aggregados.
  */
@@ -12,16 +12,33 @@
   };
 
   const TAMANO_BY_CODE = { 1: "MICRO", 2: "PEQUENA", 3: "MEDIANA", 4: "GRANDE" };
-  const TAMANO_ORDER = { MICRO: 1, PEQUENA: 2, MEDIANA: 3, GRANDE: 4, GLOBAL: 0 };
-  const GENDER_ALIASES = ["GENERO", "GÉNERO", "G�NERO", "GÊNERO"];
-  const TAMANO_ALIASES = ["TAMANO", "TAMANO_EMPRESA", "TAMANIO", "TAMA�'O", "TAMANO_EMP", "TAMAÑO", "TAMA�O"];
+  const TAMANO_ORDER = { MICRO: 1, PEQUENA: 2, MEDIANA: 3, GRANDE: 4, GLOBAL: 0, SIN_TAMANO: 99 };
+  const GENDER_ALIASES = ["GENERO", "GENERO_", "GENERO GERENTE", "GENERO_GERENTE", "GENERO__GERENTE", "GENERO__"];
+  const TAMANO_ALIASES = ["TAMANO", "TAMANO_EMPRESA", "TAMANIO", "TAMANO_EMP", "TAMANO_ACTUAL", "TAMANO_ACT", "TAMANO_2023", "TAMANO_2022"];
   const FECHA_ALIASES = ["FECHA_AFILIACION", "FECHA AFILIACION", "FECHA_INGRESO", "FECHA DE INGRESO"];
   const CARGO_ALIASES = ["CARGO", "PUESTO", "OCUPACION"];
+  const ALT_ID_ALIASES = [
+    "ID_UNICO",
+    "ID UNICO",
+    "ID_INTERNO",
+    "ID INTERNO",
+    "ID",
+    "ID_SOCIO",
+    "CODIGO_SOCIO",
+    "CODIGO",
+    "CLAVE",
+    "CLAVE_UNICA",
+    "NO",
+    "NO.",
+    "NRO",
+    "NUM",
+    "NUMERO",
+  ];
 
   // -------------- Utils ---------------- //
   function normalizeLabel(label) {
     let txt = (label || "").toString().trim().toUpperCase();
-    txt = txt.replace(/���/g, "N");
+    txt = txt.replace(/ï¿½ï¿½ï¿½/g, "N");
     txt = txt.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     txt = txt.replace(/[^A-Z0-9]+/g, "_");
     txt = txt.replace(/^_+|_+$/g, "");
@@ -29,6 +46,9 @@
   }
   function normalizeName(val) {
     return (val || "").toString().trim().toUpperCase().replace(/\s+/g, " ");
+  }
+  function normalizeKey(val) {
+    return (val || "").toString().trim().toUpperCase().replace(/\s+/g, "_");
   }
   function cleanRuc(val) {
     return (val || "").toString().replace(/[^0-9]/g, "");
@@ -57,11 +77,11 @@
     const t = (val || "").toString().trim().toUpperCase();
     if (!t) return "";
 
-    // Detectar palabras completas primero para evitar ambigüedad
-    // MUJER/FEMENINO/FEMENINA → FEMENINO
+    // Detectar palabras completas primero para evitar ambigÃ¼edad
+    // MUJER/FEMENINO/FEMENINA â†’ FEMENINO
     if (t.includes("MUJER") || t.includes("FEMEN")) return "FEMENINO";
 
-    // HOMBRE/MASCULINO/MASCULINA → MASCULINO
+    // HOMBRE/MASCULINO/MASCULINA â†’ MASCULINO
     if (t.includes("HOMBRE") || t.includes("MASC")) return "MASCULINO";
 
     // Fallback para abreviaciones (F, M, etc.)
@@ -146,24 +166,34 @@
     }
     return "";
   }
+  function entityKey(headerIndex, row) {
+    const ruc = padRuc13(getVal(row, headerIndex, ["RUC", "NUMERO_RUC", "NUM_RUC"]));
+    const razon = normalizeName(getVal(row, headerIndex, ["RAZON_SOCIAL", "RAZON SOCIAL", "EMPRESA", "NOMBRE"]));
+    const altId = normalizeKey(getVal(row, headerIndex, ALT_ID_ALIASES));
+    if (altId) {
+      if (ruc) return `${ruc}__${altId}`;
+      return `ID__${altId}`;
+    }
+    return ruc || razon || "";
+  }
 
   // -------------- Builder ---------------- //
   /**
-   * Detecta automáticamente todas las columnas de tipo T20XX (ej: T2023, T2022, T2021...)
-   * y las retorna ordenadas descendentemente por año.
+   * Detecta automÃ¡ticamente todas las columnas de tipo T20XX (ej: T2023, T2022, T2021...)
+   * y las retorna ordenadas descendentemente por aÃ±o.
    */
   function detectYearColumns(headerIndex) {
     const yearColumns = [];
     for (const colName in headerIndex) {
-      // Buscar columnas que coincidan con T + 4 dígitos (T2023, T2022, T1999, etc.)
-      const match = colName.match(/^T(\d{4})$/);
+      // Buscar columnas que coincidan con T + 4 dÃ­gitos (T2023, T2022, T1999, etc.)
+      const match = colName.match(/^T_?(\d{4})$/);
       if (match) {
         const year = parseInt(match[1], 10);
         const colIndex = headerIndex[colName];
         yearColumns.push({ year, colName, colIndex });
       }
     }
-    // Ordenar descendentemente por año (más reciente primero)
+    // Ordenar descendentemente por aÃ±o (mÃ¡s reciente primero)
     yearColumns.sort((a, b) => b.year - a.year);
     return yearColumns;
   }
@@ -172,9 +202,9 @@
     const base = readTableFlexibleByCandidates([SHEETS.BASE, SHEETS.BASE_FALLBACK]);
     const detail = [];
     const yearTotals = new Map(); // key anio|tam -> {F:count, M:count}
-    const seenRecords = new Set(); // Deduplicación RUC+AÑO+TAMAÑO+GÉNERO
+    const seenRecords = new Set(); // DeduplicaciÃ³n RUC+AÃ‘O+TAMAÃ‘O+GÃ‰NERO
 
-    // Detectar columnas T202x dinámicamente
+    // Detectar columnas T202x dinÃ¡micamente
     const yearColumns = detectYearColumns(base.headerIndex);
 
     base.rows.forEach((row) => {
@@ -188,25 +218,25 @@
       let tam = "";
       let anio = "";
 
-      // Cascada dinámica: recorrer columnas T202x en orden descendente (más reciente primero)
+      // Cascada dinÃ¡mica: recorrer columnas T202x en orden descendente (mÃ¡s reciente primero)
       for (const { year, colName, colIndex } of yearColumns) {
         if (colIndex !== undefined && row[colIndex]) {
           tam = sizeFromCode(row[colIndex]);
           anio = year.toString();
-          break; // Tomar el año más reciente que tenga datos
+          break; // Tomar el aÃ±o mÃ¡s reciente que tenga datos
         }
       }
 
-      // Fallback: si no se encontró en ninguna columna T202x
+      // Fallback: si no se encontrÃ³ en ninguna columna T202x
       if (!tam || !anio) {
         tam = normalizeTamano(getVal(row, base.headerIndex, TAMANO_ALIASES));
         anio = getYear(getVal(row, base.headerIndex, FECHA_ALIASES));
       }
 
-      // FILTRO #2: Descartar filas sin año válido
+      // FILTRO #2: Descartar filas sin aÃ±o vÃ¡lido
       if (!anio || anio === "DESCONOCIDO") return;
 
-      // Si no hay tamaño pero sí hay año válido, marcar como SIN_TAMANO
+      // Si no hay tamaÃ±o pero sÃ­ hay aÃ±o vÃ¡lido, marcar como SIN_TAMANO
       if (!tam) {
         tam = "SIN_TAMANO";
       }
@@ -214,8 +244,8 @@
       const ruc = padRuc13(getVal(row, base.headerIndex, ["RUC"]));
       const razon = normalizeName(getVal(row, base.headerIndex, ["RAZON_SOCIAL", "RAZON SOCIAL", "EMPRESA"]));
 
-      // FILTRO #3: Deduplicación - evitar contar múltiples veces mismo RUC+AÑO+TAMAÑO+GÉNERO
-      const dedupKey = `${ruc}|${anio}|${tam}|${genero}`;
+      // FILTRO #3: DeduplicaciÃ³n - evitar contar mÃºltiples veces mismo RUC+AÃ‘O+TAMAÃ‘O+GÃ‰NERO
+      const dedupKey = `${entityKey(base.headerIndex, row) || ruc}|${anio}|${tam}|${genero}`;
       if (seenRecords.has(dedupKey)) return;
       seenRecords.add(dedupKey);
 
@@ -228,7 +258,7 @@
       yearTotals.set(k, current);
     });
 
-    // Global por año
+    // Global por aÃ±o
     const globalTotals = new Map();
     yearTotals.forEach((val, key) => {
       const [anio] = key.split("||");
@@ -276,7 +306,7 @@
       shPivot.getRange(2, 6, pivotRows.length, 1).setNumberFormat("0.00%");
     }
 
-    // Tabla wide para uso directo en gráficos
+    // Tabla wide para uso directo en grÃ¡ficos
     const wideMap = new Map(); // key anio||tam -> {F, M, total, pctF, pctM, orden}
     pivotRows.forEach((r) => {
       const [anio, tam, genero, count, total, pct, orden] = r;
@@ -340,7 +370,7 @@
     const val = range.getValue();
     if (val === true) {
       const ss = SpreadsheetApp.getActive();
-      ss.toast("Actualizando dashboard…");
+      ss.toast("Actualizando dashboardâ€¦");
       try {
         refreshDashboardGenero();
         ss.toast("Dashboard listo.");
@@ -357,14 +387,17 @@
   global.onEditDash3 = onEditDash3;
 })(this);
 
-// Wrappers visibles para el menú de Apps Script si el editor no detecta las asignaciones dinámicas.
+// Wrappers visibles para el menÃº de Apps Script si el editor no detecta las asignaciones dinÃ¡micas.
 function refreshDashboardGeneroWrapper() {
   return refreshDashboardGenero();
 }
 function onOpenDash3Wrapper() {
   return onOpenDash3();
 }
-// Wrapper para que el trigger instalable detecte la función en el selector
+// Wrapper para que el trigger instalable detecte la funciÃ³n en el selector
 function onEditDash3Wrapper(e) {
   return onEditDash3(e);
 }
+
+
+

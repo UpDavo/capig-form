@@ -7,8 +7,8 @@
   const SHEETS = {
     BASE: "SOCIOS",
     BASE_FALLBACK: "BASE DE DATOS",
-    CAP_HIST: "CAPACITACIONES",
-    CAP_HIST_FALLBACK: null,
+    CAP_HIST: "CAPACITACIONES_HISTORICAS",
+    CAP_HIST_FALLBACK: "CAPACITACIONES_HISTORICO",
     CAP_NEW: "CAPACITACIONES",
     CAP_NEW_FALLBACK: "CAPACITACIONES_FINAL",
     OUT_RESUMEN: "PIVOT_CAPACITACIONES_RESUMEN_ANIO",
@@ -20,18 +20,36 @@
     OUT_MASTER_SLICER: "DASH5_MAESTRA",
   };
 
-  const TAMANO_ORDER = { MICRO: 1, PEQUENA: 2, MEDIANA: 3, GRANDE: 4, GLOBAL: 0 };
+  const TAMANO_ORDER = { MICRO: 1, PEQUENA: 2, MEDIANA: 3, GRANDE: 4, GLOBAL: 0, SIN_TAMANO: 99, DESCONOCIDO: 99 };
+  const ALT_ID_ALIASES = [
+    "ID_UNICO",
+    "ID UNICO",
+    "ID_INTERNO",
+    "ID INTERNO",
+    "ID",
+    "ID_SOCIO",
+    "CODIGO_SOCIO",
+    "CODIGO",
+    "CLAVE",
+    "CLAVE_UNICA",
+    "NO",
+    "NO.",
+    "NRO",
+    "N°",
+    "NUM",
+    "NUMERO",
+  ];
   const CAP_TRIMESTRE_ALIASES = [
-    ["1ER_TRIMESTRE", "1ER TRIMESTRE", "PRIMER_TRIMESTRE", "PRIMER TRIMESTRE"],
-    ["2DO_TRIMESTRE", "2DO TRIMESTRE", "SEGUNDO_TRIMESTRE", "SEGUNDO TRIMESTRE"],
-    ["3ER_TRIMESTRE", "3ER TRIMESTRE", "TERCER_TRIMESTRE", "TERCER TRIMESTRE"],
-    ["4TO_TRIMESTRE", "4TO TRIMESTRE", "CUARTO_TRIMESTRE", "CUARTO TRIMESTRE"],
+    ["1ER_TRIMESTRE", "1ER TRIMESTRE", "PRIMER_TRIMESTRE", "PRIMER TRIMESTRE", "Q1_CAPACITACIONES", "Q1"],
+    ["2DO_TRIMESTRE", "2DO TRIMESTRE", "SEGUNDO_TRIMESTRE", "SEGUNDO TRIMESTRE", "Q2_CAPACITACIONES", "Q2"],
+    ["3ER_TRIMESTRE", "3ER TRIMESTRE", "TERCER_TRIMESTRE", "TERCER TRIMESTRE", "Q3_CAPACITACIONES", "Q3"],
+    ["4TO_TRIMESTRE", "4TO TRIMESTRE", "CUARTO_TRIMESTRE", "CUARTO TRIMESTRE", "Q4_CAPACITACIONES", "Q4"],
   ];
   const VALOR_TRIMESTRE_ALIASES = [
-    ["VALOR_1ER", "VALOR 1ER", "VALOR_1ER_TRIMESTRE", "VALOR 1ER TRIMESTRE"],
-    ["VALOR_2DO", "VALOR 2DO", "VALOR_2DO_TRIMESTRE", "VALOR 2DO TRIMESTRE"],
-    ["VALOR_3ER", "VALOR 3ER", "VALOR_3ER_TRIMESTRE", "VALOR 3ER TRIMESTRE"],
-    ["VALOR_4TO", "VALOR 4TO", "VALOR_4TO_TRIMESTRE", "VALOR 4TO TRIMESTRE"],
+    ["VALOR_1ER", "VALOR 1ER", "VALOR_1ER_TRIMESTRE", "VALOR 1ER TRIMESTRE", "Q1_VALOR", "VALOR_Q1"],
+    ["VALOR_2DO", "VALOR 2DO", "VALOR_2DO_TRIMESTRE", "VALOR 2DO TRIMESTRE", "Q2_VALOR", "VALOR_Q2"],
+    ["VALOR_3ER", "VALOR 3ER", "VALOR_3ER_TRIMESTRE", "VALOR 3ER TRIMESTRE", "Q3_VALOR", "VALOR_Q3"],
+    ["VALOR_4TO", "VALOR 4TO", "VALOR_4TO_TRIMESTRE", "VALOR 4TO TRIMESTRE", "Q4_VALOR", "VALOR_Q4"],
   ];
 
   // ---------- Utils ----------
@@ -46,6 +64,9 @@
 
   function normalizeName(val) {
     return (val || "").toString().trim().toUpperCase().replace(/\s+/g, " ");
+  }
+  function normalizeKey(val) {
+    return (val || "").toString().trim().toUpperCase().replace(/\s+/g, "_");
   }
 
   function cleanRuc(val) {
@@ -209,25 +230,40 @@
       capHist = { headerIndex: {}, rows: [], name: capHist.name };
     }
 
-    // Mapear base: RUC -> {tamano, razon, anioAfiliacion}
+    // Mapear base: RUC/ALT_ID/RAZON -> {tamano, razon, anioAfiliacion}
     const baseMap = new Map();
     const razonToBase = new Map();
+    const altIdToBase = new Map();
     base.rows.forEach((row) => {
       const ruc = padRuc13(getVal(row, base.headerIndex, ["RUC"]));
-      if (!ruc) return;
+      const altId = normalizeKey(getVal(row, base.headerIndex, ALT_ID_ALIASES));
+      if (!ruc && !altId) return;
       const razon = normalizeName(getVal(row, base.headerIndex, ["RAZON_SOCIAL", "RAZON SOCIAL", "EMPRESA"]));
-      const tam = normalizeTamano(getVal(row, base.headerIndex, ["TAMANO", "TAMANO_EMPRESA", "TAMANIO", "TAMAO", "TAMA\u00d1O"]));
+      const tam =
+        normalizeTamano(getVal(row, base.headerIndex, ["TAMANO", "TAMANO_EMPRESA", "TAMANIO", "TAMAO", "TAMA\u00d1O"])) ||
+        "SIN_TAMANO";
       const anioAf = getYear(getVal(row, base.headerIndex, ["FECHA_AFILIACION", "FECHA AFILIACION", "FECHA DE INGRESO"]));
-      baseMap.set(ruc, { razon, tamano: tam || "DESCONOCIDO", anioAfiliacion: anioAf });
-      if (razon) razonToBase.set(razon, ruc);
+      const data = { razon, tamano: tam || "SIN_TAMANO", anioAfiliacion: anioAf };
+      if (ruc) baseMap.set(ruc, data);
+      if (altId) altIdToBase.set(altId, data);
+      if (razon) razonToBase.set(razon, ruc || altId || razon);
     });
     Logger.log(`[DASH5] Empresas en BASE: ${baseMap.size}`);
 
     // Helper para obtener identidad empresa
-    function resolveEmpresaByName(name) {
+    function resolveEmpresaByName(name, rowForAltId, rowHeaderIndex) {
       const razon = normalizeName(name);
-      const ruc = razonToBase.get(razon) || "";
-      const info = ruc ? baseMap.get(ruc) : null;
+      let ruc = razonToBase.get(razon) || "";
+      let info = ruc ? baseMap.get(ruc) : null;
+      if (!info && rowForAltId) {
+        const altId = normalizeKey(getVal(rowForAltId, rowHeaderIndex || {}, ALT_ID_ALIASES));
+        if (altId) {
+          if (altIdToBase.has(altId)) {
+            info = altIdToBase.get(altId);
+          }
+          if (!ruc && altId) ruc = altId; // clave auxiliar para dedupe
+        }
+      }
       const tam = info ? info.tamano : "";
       const anioAfiliacion = info ? info.anioAfiliacion : "";
       return { razon, ruc, tam, anioAfiliacion };
@@ -256,7 +292,7 @@
       const razonNorm = normalizeName(razonRaw);
       const rucHist = padRuc13(getVal(row, capHist.headerIndex, ["RUC"]));
       const fechaHistRaw = getVal(row, capHist.headerIndex, ["FECHA", "FECHA_CAP", "FECHA_CAPACITACION", "FECHA CAP"]);
-      const { razon, ruc: rucBase, tam, anioAfiliacion } = resolveEmpresaByName(razonRaw);
+      const { razon, ruc: rucBase, tam, anioAfiliacion } = resolveEmpresaByName(razonRaw, row, capHist.headerIndex);
       const ruc = rucHist || rucBase;
       const key = ruc || razon;
       if (!key) return;
@@ -284,7 +320,7 @@
         key,
         ruc,
         razon,
-        tamano: tam || tamanoHist || "DESCONOCIDO",
+        tamano: tam || tamanoHist || "SIN_TAMANO",
         esSocio: !!ruc && razonNorm !== "NO SOCIOS" && razonNorm !== "NO_SOCIOS",
         capCount,
         valor,
@@ -300,14 +336,15 @@
     capNew.rows.forEach((row, idx) => {
       const razonRaw = getVal(row, capNew.headerIndex, ["RAZON SOCIAL", "RAZON_SOCIAL", "Razon Social"]);
       const rucNew = padRuc13(getVal(row, capNew.headerIndex, ["RUC"]));
-      const { razon, ruc: rucBase, tam } = resolveEmpresaByName(razonRaw);
+      const { razon, ruc: rucBase, tam } = resolveEmpresaByName(razonRaw, row, capNew.headerIndex);
       const razonNorm = normalizeName(razonRaw);
       const ruc = rucNew || rucBase;
       const key = ruc || razon;
       if (!key) return;
       const valor = parseMonto(getVal(row, capNew.headerIndex, ["VALOR DEL PAGO", "VALOR", "VALOR_PAGO"]));
       const fecha = getVal(row, capNew.headerIndex, ["FECHA"]);
-      const anio = getYear(fecha) || "DESCONOCIDO";
+      // Si no hay fecha, usar el año de referencia detectado (o año actual) para no perder la fila en pivots por año.
+      const anio = getYear(fecha) || anioHistRef;
       const dedupKey = `${anio}|${key}|${fecha || "SIN_FECHA"}|DJANGO`;
       if (dedupSet.has(dedupKey)) {
         duplicados.push({ fuente: "DJANGO", anio, key, razon, ruc, fecha, valor, capCount: 1 });
@@ -319,7 +356,7 @@
         key,
         ruc,
         razon,
-        tamano: tam || "DESCONOCIDO",
+        tamano: tam || "SIN_TAMANO",
         esSocio: !!ruc && razonNorm !== "NO SOCIOS" && razonNorm !== "NO_SOCIOS",
         capCount: 1,
         valor,

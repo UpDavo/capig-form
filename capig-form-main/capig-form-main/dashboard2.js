@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Tablas para el dashboard de cambios de tamano (crecimiento/decrecimiento).
  * Ejecutar refreshDashboardTamano() para regenerar los pre-aggregados.
  */
@@ -29,17 +29,35 @@ const Dash2Module = (function () {
   const FIELD_ALIASES = {
     RUC: ["RUC", "NUMERO_RUC", "NUM_RUC"],
     RAZON: ["RAZON_SOCIAL", "RAZON SOCIAL", "EMPRESA", "NOMBRE", "RAZON_SOCIA"],
-    TAMANO: ["TAMANO", "TAMANO_EMPRESA", "TAMANIO", "TAMA�'O", "TAMANO_EMP"],
+    ALT_ID: [
+      "ID_UNICO",
+      "ID UNICO",
+      "ID_INTERNO",
+      "ID INTERNO",
+      "ID",
+      "ID_SOCIO",
+      "CODIGO_SOCIO",
+      "CODIGO",
+      "CLAVE",
+      "CLAVE_UNICA",
+      // Soporte para columnas tipo "No." que ya vienen numeradas en la base
+      "NO",
+      "NO.",
+      "NRO",
+      "NUM",
+      "NUMERO",
+    ],
+    TAMANO: ["TAMANO", "TAMANO_EMPRESA", "TAMANIO", "TAMAï¿½'O", "TAMANO_EMP"],
     SECTOR: ["SECTOR", "SECTOR "],
     FECHA_AF: ["FECHA_AFILIACION", "FECHA AFILIACION", "FECHA_INGRESO", "FECHA DE INGRESO", "FECHA_REGISTRO"],
     VENTAS: ["VENTAS", "VENTAS_ANUAL", "VENTAS_ANUALES", "VENTAS_MONT_EST", "MONTO_ESTIMADO", "MONTO_TOTAL", "VALOR TOTAL"],
-    ANIO: ["ANIO", "ANO", "A�'O", "ANIO_VENTA", "ANO_VENTA", "A�'O_VENTA", "A�'O VENTA"],
+    ANIO: ["ANIO", "ANO", "Aï¿½'O", "ANIO_VENTA", "ANO_VENTA", "Aï¿½'O_VENTA", "Aï¿½'O VENTA"],
   };
 
   // ------------------ Utils ------------------ //
   function normalizeLabel(label) {
     let txt = (label || "").toString().trim().toUpperCase();
-    txt = txt.replace(/���/g, "N");
+    txt = txt.replace(/ï¿½ï¿½ï¿½/g, "N");
     txt = txt.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     txt = txt.replace(/[^A-Z0-9]+/g, "_");
     txt = txt.replace(/^_+|_+$/g, "");
@@ -47,6 +65,9 @@ const Dash2Module = (function () {
   }
   function normalizeName(val) {
     return (val || "").toString().trim().toUpperCase().replace(/\s+/g, " ");
+  }
+  function normalizeKey(val) {
+    return (val || "").toString().trim().toUpperCase().replace(/\s+/g, "_");
   }
   function cleanRuc(val) {
     return (val || "").toString().replace(/[^0-9]/g, "");
@@ -128,9 +149,13 @@ const Dash2Module = (function () {
   function entityKey(headerIndex, row) {
     const ruc = padRuc13(getVal(row, headerIndex, FIELD_ALIASES.RUC));
     const razon = normalizeName(getVal(row, headerIndex, FIELD_ALIASES.RAZON));
+    const altId = normalizeKey(getVal(row, headerIndex, FIELD_ALIASES.ALT_ID || []));
+    if (altId) {
+      if (ruc) return `${ruc}__${altId}`;
+      return `ID__${altId}`;
+    }
     return ruc || razon || "";
   }
-
   // ------------------ Readers ------------------ //
   function readTableFlexible(sheetName) {
     const ss = SpreadsheetApp.getActive();
@@ -217,14 +242,14 @@ const Dash2Module = (function () {
       const blocks = splitBlocksByHeader(values);
       blocks.forEach((block) => {
         const { headerIndex, rows } = block;
-        const yearCols = Object.keys(headerIndex).filter((k) => /^T20\d{2}$/.test(k));
+        const yearCols = Object.keys(headerIndex).filter((k) => /^T_?\d{4}$/.test(k));
         rows.forEach((row) => {
           const ruc = padRuc13(getVal(row, headerIndex, FIELD_ALIASES.RUC));
           const razon = normalizeName(getVal(row, headerIndex, FIELD_ALIASES.RAZON));
           yearCols.forEach((colKey) => {
             const val = row[headerIndex[colKey]];
             const tam = sizeFromCode(val);
-            const year = colKey.replace(/^T/, "");
+            const year = colKey.replace(/^T_?/, "");
             if (tam) addRecord({ ruc, razon, year, tamano: tam, fuente: baseSheetName || DASH2_SHEETS.BASE, priority: 1 });
           });
           const tamExplicit = normalizeTamano(getVal(row, headerIndex, FIELD_ALIASES.TAMANO));
@@ -395,7 +420,7 @@ const Dash2Module = (function () {
     sh2023.getRange(1, 1, out2023.length, headers2023.length).setValues(out2023);
     sh2023.autoResizeColumns(1, headers2023.length);
 
-    // Versión completa (incluye saltos de más de 1 nivel) para referencias tipo PPT.
+    // VersiÃ³n completa (incluye saltos de mÃ¡s de 1 nivel) para referencias tipo PPT.
     const rows2023Full = pivotRows.filter((r) => r[0] === "2022" && r[1] === "2023");
     const sh2023Full = getSheetOrCreate("DASH_CAMBIO_TAMANO_2023_FULL");
     sh2023Full.clear();
@@ -406,7 +431,7 @@ const Dash2Module = (function () {
     sh2023Full.getRange(1, 1, out2023Full.length, headers2023Full[0] ? headers2023Full.length : 0).setValues(out2023Full);
     sh2023Full.autoResizeColumns(1, headers2023Full.length);
 
-    // Tabla plana para vistas rápidas por dirección (compatible con slicer de ANIO_INICIAL).
+    // Tabla plana para vistas rÃ¡pidas por direcciÃ³n (compatible con slicer de ANIO_INICIAL).
     const summaryRows = pivotRows.map((r) => [
       r[0], // ANIO_INICIAL
       `${r[2]} -> ${r[3]}`, // TRANSICION
@@ -475,7 +500,7 @@ function onEditDash2(e) {
   const val = range.getValue();
   if (val === true) {
     const ss = SpreadsheetApp.getActive();
-    ss.toast("Actualizando dashboard…");
+    ss.toast("Actualizando dashboardâ€¦");
     try {
       refreshDashboardTamano();
       ss.toast("Dashboard listo.");
@@ -486,7 +511,13 @@ function onEditDash2(e) {
   }
 }
 
-// Wrapper opcional para asignar a un botón/imagen
+// Wrapper opcional para asignar a un botÃ³n/imagen
 function refreshDashboardTamanoWrapper() {
   return refreshDashboardTamano();
 }
+
+
+
+
+
+

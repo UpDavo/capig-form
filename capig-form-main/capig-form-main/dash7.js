@@ -1,7 +1,8 @@
 ﻿/**
  * Dashboard de Asesorias Legales - DASH7
- * Integra historico (hoja DIAGNOSTICO - columna LEGAL) + registros Django en DIAGNOSTICO_FINAL.
- * Enfocado solo en tipo LEGAL y sus subtipos (laboral, societario, propiedad intelectual, contacto, otros).
+ * Integra historico (DIAGNOSTICOS_HISTORICOS/DIAGNOSTICO) + registros Django (DIAGNOSTICOS/DIAGNOSTICO_FINAL).
+ * Solo tipo LEGAL (asesorias) con subtipos laborales/societario/propiedad intelectual/contacto/otros.
+ * Denominador: empresas presentes en diagnosticos/historicos (incluye NO); Numerador: filas LEGAL con conteo positivo.
  */
 (function (global) {
   const SHEETS = {
@@ -9,6 +10,7 @@
     BASE_FALLBACK: "BASE DE DATOS",
     DIAG_DJANGO: "DIAGNOSTICOS",
     DIAG_DJANGO_FALLBACK: "DIAGNOSTICO_FINAL",
+    DIAG_HIST: "DIAGNOSTICOS_HISTORICOS",
     OUT_RESUMEN: "PIVOT_ASESORIAS_RESUMEN_ANIO",
     OUT_SUBTIPO: "PIVOT_ASESORIAS_SUBTIPO_ANIO",
     OUT_EMPRESAS: "PIVOT_ASESORIAS_POR_EMPRESA",
@@ -18,47 +20,94 @@
   const TAMANO_ORDER = { MICRO: 1, PEQUENA: 2, MEDIANA: 3, GRANDE: 4, SIN_TAMANO: 99 };
   const HIST_YEAR = "HISTORICO";
   const NO_DATE_YEAR = "SIN_FECHA";
-  const PROFILES = {
-    FULL: {
-      // Todo lo legal sin descartar
-      requireFechaDjango: false,
-      dropSinSubtipo: false,
-      allowedSubtipos: [],
-      soloSocios: false,
-      socioFieldNames: ["SOCIO", "SOCIOS", "ES_SOCIO", "TIPO_SOCIO", "ESTADO_SOCIO", "ESTADO AFILIADO", "ESTADO_AFILIADO"],
-      socioYesValues: ["SI", "1", "SOCIO", "SOCIOS", "ACTIVO"],
-      socioNoValues: ["NO", "NO SOCIO", "NO SOCIOS", "NO SOCIA", "NO SOCIAS"],
-      dedupStrategy: "none", // none | emp-subtipo-anio | emp-anio
-    },
-    PPT: {
-      // Acercar al PPT (36/21 aprox) - INCLUYE NO SOCIOS
-      requireFechaDjango: false, // permitir sin fecha, se anclan al anio referencia
-      dropSinSubtipo: true, // descartar SIN SUBTIPO/PENDIENTE
-      allowedSubtipos: ["LABORAL", "SOCIETARIO", "PROPIEDAD INTELECTUAL", "CONTACTO", "OTROS"],
-      soloSocios: false, // INCLUIR NO SOCIOS
-      socioFieldNames: ["SOCIO", "SOCIOS", "ES_SOCIO", "TIPO_SOCIO", "ESTADO_SOCIO", "ESTADO AFILIADO", "ESTADO_AFILIADO"],
-      socioYesValues: ["SI", "1", "SOCIO", "SOCIOS", "ACTIVO"],
-      socioNoValues: ["NO", "NO SOCIO", "NO SOCIOS", "NO SOCIA", "NO SOCIAS"],
-      dedupStrategy: "none", // CONTAR TODAS las asesorias
-    },
-  };
-  const PROFILE = "PPT";
-  const FILTERS = PROFILES[PROFILE];
+  const DEFAULT_HIST_YEAR = "2025";
+  const TYPE_COLUMNS = ["LEAN", "ESTRATEGIA", "LEGAL", "AMBIENTE", "RRHH"];
+  const ALLOWED_SUBTIPOS = ["LABORAL", "SOCIETARIO", "PROPIEDAD INTELECTUAL", "CONTACTO", "OTROS"];
+  const LEGAL_SHEETS = ["LEGAL 1", "LEGAL1", "LEGAL_1", "LEGAL 2", "LEGAL2", "LEGAL_2"];
+  const ALT_ID_ALIASES = [
+    "ID_UNICO",
+    "ID UNICO",
+    "ID_INTERNO",
+    "ID INTERNO",
+    "ID",
+    "ID_SOCIO",
+    "CODIGO_SOCIO",
+    "CODIGO",
+    "CLAVE",
+    "CLAVE_UNICA",
+    "NO",
+    "NO.",
+    "NRO",
+    "N°",
+    "NUM",
+    "NUMERO",
+  ];
+  const TOTAL_ASESORIAS_ALIASES = [
+    "TOTAL_ASESORIAS",
+    "TOTAL ASESORIAS",
+    "TOTAL_ASESORIA",
+    "TOTAL SERVICIO LEGAL",
+    "TOTAL_SERVICIO_LEGAL",
+    "TOTAL LEGAL",
+  ];
+  const LEGAL_MARKER_ALIASES = [
+    "LEGAL",
+    "LEGAL_",
+    "LEGAL1",
+    "LEGAL 1",
+    "LEGAL_1",
+    "LEGAL2",
+    "LEGAL 2",
+    "LEGAL_2",
+    "LEGAL DIAGNOSTICO",
+    "LEGAL_DIAGNOSTICO",
+    "LEGAL_SERVICIO",
+    "LEGAL SERVICIO",
+    "LEGAL_SERVICIOS",
+    "LEGAL SERVICIOS",
+    "ASESORIA_LEGAL",
+    "ASESORIA LEGAL",
+    "ASESORIAS_LEGALES",
+    "ASESORIA LEGAL 1",
+    "ASESORIA LEGAL 2",
+  ];
+  const SERVICIO_LEGAL_ALIASES = [
+    "SERVICIO_LEGAL",
+    "SERVICIO LEGAL",
+    "SERVICIO LEGAL?",
+    "SERVICIOS_LEGALES",
+    "SERVICIO LEGAL 1",
+    "SERVICIO LEGAL 2",
+  ];
+    const SERVICIO_FLAG_ALIASES = ["SERVICIO", "SERVICIO LEGAL", "SERVICIO LEGAL?", "DIAGNOSTICO", "DIAGNOSTICO", "DIAGNOSTICO?"];
+  const SUBTIPO_ALIASES = [
+    "SUBTIPO_DIAGNOSTICO",
+    "SUBTIPO_DE_DIAGNOSTICO",
+    "SUBTIPO",
+    "SUBTIPO DIAGNOSTICO",
+    "SUBTIPO DE DIAGNOSTICO",
+    "OTROS_SUBTIPO",
+    "OTROS SUBTIPO",
+  ];
 
-  // ---------- Utils (copiados de dash6) ----------
+  // ---------- Utils ----------
   function normalizeLabel(label) {
     let txt = (label || "").toString().trim().toUpperCase();
-    txt = txt.replace(/\u00d1/g, "N");
+    txt = txt.replace(/\u00d1|\u00f1/g, "N");
     txt = txt.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     txt = txt.replace(/[^A-Z0-9]+/g, "_");
     txt = txt.replace(/^_+|_+$/g, "");
     return txt;
   }
 
+  function normalizeKey(val) {
+    return (val || "").toString().trim().toUpperCase().replace(/\s+/g, "_");
+  }
+
   function normalizeName(val) {
     let name = (val || "").toString().trim().toUpperCase();
     name = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-    name = name.replace(/\u00d1/g, "N");
+    name = name.replace(/\u00d1|\u00f1/g, "N");
     name = name.replace(/[.,\-\/()'"`]/g, " ");
     name = name.replace(/\b(S\s*A|C\s*I\s*A|L\s*T\s*D\s*A|L\s*T\s*D|C\s*A|S\s*A\s*S|SOCIEDAD|ANONIMA|COMPANIA|LIMITADA)\b/gi, " ");
     name = name.replace(/\s+/g, " ").trim();
@@ -67,28 +116,6 @@
 
   function cleanRuc(val) {
     return (val || "").toString().replace(/[^0-9]/g, "");
-  }
-
-  function isTruthyMark(val) {
-    const t = (val || "").toString().trim().toUpperCase();
-    if (!t) return false;
-    return t === "X" || t === "S" || t === "SI" || t === "1";
-  }
-
-  function isFalsyMark(val) {
-    const t = (val || "").toString().trim().toUpperCase();
-    if (!t) return true;
-    return t === "0" || t === "-" || t === "NO" || t === "N" || t === "NULL";
-  }
-
-  function isYes(val, yesList) {
-    const norm = normalizeLabel(val);
-    return yesList.some((y) => normalizeLabel(y) === norm);
-  }
-
-  function isNo(val, noList) {
-    const norm = normalizeLabel(val);
-    return noList.some((n) => normalizeLabel(n) === norm);
   }
 
   function padRuc13(ruc) {
@@ -106,6 +133,19 @@
     if (t.indexOf("MEDI") !== -1) return "MEDIANA";
     if (t.indexOf("GRAN") !== -1) return "GRANDE";
     return t;
+  }
+
+  function normalizeSector(val) {
+    const s = (val || "").toString().trim().toUpperCase();
+    if (!s) return "SIN CLASIFICAR";
+    if (s.indexOf("QUIM") !== -1) return "QUIMICO";
+    if (s.indexOf("METAL") !== -1) return "METALMECANICO";
+    if (s.indexOf("ALIMENT") !== -1) return "ALIMENTOS";
+    if (s.indexOf("AGRIC") !== -1 || s.indexOf("AGROP") !== -1) return "AGRICOLA";
+    if (s.indexOf("MAQUIN") !== -1) return "MAQUINARIAS";
+    if (s.indexOf("CONST") !== -1) return "CONSTRUCCION";
+    if (s.indexOf("TEXT") !== -1) return "TEXTIL";
+    return s;
   }
 
   function parseDateFlexible(val) {
@@ -141,12 +181,13 @@
     const t = (val || "").toString().trim().toUpperCase();
     if (!t) return "SIN TIPO";
     const clean = t.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const compact = clean.replace(/\s+/g, "");
+    if (compact === "NINGUNO" || compact === "NINGUNA" || compact === "NINGUN") return "NINGUNO";
     if (clean.indexOf("LEGAL") !== -1) return "LEGAL";
     if (clean.indexOf("ESTRAT") !== -1) return "ESTRATEGIA";
     if (clean.indexOf("LEAN") !== -1) return "LEAN";
     if (clean.indexOf("AMBI") !== -1) return "AMBIENTE";
     if (clean.indexOf("RRHH") !== -1 || clean.indexOf("RH") !== -1 || clean.indexOf("RECURSO") !== -1) return "RRHH";
-    if (clean === "NINGUNO") return "NINGUNO";
     return clean;
   }
 
@@ -164,17 +205,25 @@
     return normalized;
   }
 
-  function normalizeSector(val) {
-    const s = (val || "").toString().trim().toUpperCase();
-    if (!s) return "SIN CLASIFICAR";
-    if (s.indexOf("QUIM") !== -1) return "QUIMICO";
-    if (s.indexOf("METAL") !== -1) return "METALMECANICO";
-    if (s.indexOf("ALIMENT") !== -1) return "ALIMENTOS";
-    if (s.indexOf("AGRIC") !== -1 || s.indexOf("AGROP") !== -1) return "AGRICOLA";
-    if (s.indexOf("MAQUIN") !== -1) return "MAQUINARIAS";
-    if (s.indexOf("CONST") !== -1) return "CONSTRUCCION";
-    if (s.indexOf("TEXT") !== -1) return "TEXTIL";
-    return s;
+  function normalizeSubtipoLegal(val) {
+    const norm = normalizeSubtipoDiagnostico(val);
+    if (!norm || norm === "SIN SUBTIPO" || norm === "PENDIENTE") return "SIN SUBTIPO";
+    if (ALLOWED_SUBTIPOS.includes(norm)) return norm;
+    return "OTROS";
+  }
+
+  function isMarkerEmpty(val) {
+    const t = (val || "").toString().trim().toUpperCase();
+    if (!t) return true;
+    const compact = t.replace(/\s+/g, "");
+    return compact === "X" || compact === "-" || compact === "N/A" || compact === "NA" || compact === "N\\A";
+  }
+
+  function shouldSkipDiagnosticoFlag(flag) {
+    const t = (flag || "").toString().trim().toUpperCase();
+    if (!t) return true;
+    if (isMarkerEmpty(t)) return true;
+    return t.startsWith("NO");
   }
 
   function getSheetOrCreate(name) {
@@ -209,7 +258,6 @@
       if (h && headerIndex[h] === undefined) headerIndex[h] = idx;
     });
 
-    // Fallback: si no encontramos RAZON_SOCIAL ni RUC, reintentar buscando la primera fila que los tenga
     if (headerIndex["RAZON_SOCIAL"] === undefined && headerIndex["RUC"] === undefined) {
       for (let i = 0; i < values.length; i++) {
         const norm = values[i].map(normalizeLabel);
@@ -229,21 +277,6 @@
     return { headerIndex, rows };
   }
 
-  function getVal(row, headerIndex, aliasList) {
-    for (const alias of aliasList) {
-      const key = normalizeLabel(alias);
-      const idx = headerIndex[key];
-      if (idx !== undefined && idx < row.length) {
-        const val = row[idx];
-        if (val !== null && val !== undefined && val !== "") return val;
-      }
-    }
-    return "";
-  }
-
-  /**
-   * Intentar leer la primera hoja disponible de la lista de candidatos.
-   */
   function readTableFlexibleByCandidates(names = []) {
     const ss = SpreadsheetApp.getActive();
     for (const name of names) {
@@ -259,155 +292,403 @@
     return { headerIndex: {}, rows: [] };
   }
 
+  function getVal(row, headerIndex, aliasList) {
+    for (const alias of aliasList) {
+      const key = normalizeLabel(alias);
+      const idx = headerIndex[key];
+      if (idx !== undefined && idx < row.length) {
+        const val = row[idx];
+        if (val !== null && val !== undefined && val !== "") return val;
+      }
+    }
+    return "";
+  }
+
+  function parseCountFlexible(val) {
+    if (val === null || val === undefined) return 0;
+    const raw = val.toString().trim();
+    if (!raw) return 0;
+    const num = Number(raw);
+    if (!isNaN(num)) return num > 0 ? num : 0;
+    const upperNorm = raw.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    if (upperNorm === "SI" || upperNorm === "TRUE" || upperNorm === "X") return 1;
+    return 0;
+  }
+
+  function parseCountNumber(val) {
+    if (val === null || val === undefined) return 0;
+    const raw = val.toString().trim();
+    if (!raw) return 0;
+    const num = Number(raw);
+    if (!isNaN(num)) return num > 0 ? num : 0;
+    const upperNorm = raw.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    if (upperNorm === "SI" || upperNorm === "TRUE" || upperNorm === "X") return 1;
+    return 0;
+  }
+
+  function collectLegalCount(row, headerIndex, tipoRaw) {
+    if (tipoRaw !== "LEGAL") {
+      return { total: 0, fromTotal: 0, fromLegal: 0, fromServicio: 0, hasServicio: false };
+    }
+    const fromTotal = parseCountFlexible(getVal(row, headerIndex, TOTAL_ASESORIAS_ALIASES));
+    let fromLegal = 0;
+    LEGAL_MARKER_ALIASES.forEach((alias) => {
+      const v = getVal(row, headerIndex, [alias]);
+      fromLegal += parseCountFlexible(v);
+    });
+    let fromServicio = 0;
+    SERVICIO_LEGAL_ALIASES.forEach((alias) => {
+      const v = getVal(row, headerIndex, [alias]);
+      fromServicio += parseCountFlexible(v);
+    });
+    let total = fromTotal > 0 ? fromTotal : fromLegal + fromServicio;
+    const hasServicio = fromServicio > 0 || fromTotal > 0 || fromLegal > 0;
+    if (total < 0) total = 0;
+    return { total, fromTotal, fromLegal, fromServicio, hasServicio };
+  }
+
+  function applyManualAliases(aliasToRuc, baseMap) {
+    const manual = [
+      { ruc: "0991300333001", aliases: ["JAZUL", "TONISA", "TONISA S.A.", "TONISA SA"] },
+      { ruc: "0992257946001", aliases: ["MUNDOCARE", "MUNDOCARE S.A.", "MUNDOCARE SA", "ECUASERVIGLOBAL", "ECUASERVIGLOBAL S.A."] },
+      { ruc: "0991318380001", aliases: ["CORDOVA DONOSO SONIA SALOME", "CONSTRUME", "CONSTRUCCIONES CIVILES Y METALICAS CONSTRUME", "CONSTRUCCIONES CIVILES Y METALICAS CONSTRUME S.A."] },
+    ];
+    manual.forEach((entry) => {
+      const info = baseMap.get(entry.ruc);
+      if (!info) return;
+      entry.aliases.forEach((a) => {
+        const norm = normalizeName(a);
+        aliasToRuc.set(norm, entry.ruc);
+      });
+    });
+  }
+
   // ---------- Core ----------
   function buildAsesoriasLegalesData() {
     Logger.log("[DASH7] Iniciando generacion...");
 
     const base = readTableFlexibleByCandidates([SHEETS.BASE, SHEETS.BASE_FALLBACK]);
     const diagDjango = readTableFlexibleByCandidates([SHEETS.DIAG_DJANGO, SHEETS.DIAG_DJANGO_FALLBACK, "DIAGNOSTICO"]);
+    const diagHist = { headerIndex: {}, rows: [] }; // historico fuera de uso (ya consolidado en DIAGNOSTICOS)
 
-    Logger.log(`[DASH7] Filas diagnosticos: ${diagDjango.rows.length} | Filas base: ${base.rows.length}`);
+    Logger.log(`[DASH7] Filas DIAGNOSTICOS: ${diagDjango.rows.length} | Filas historico: ${diagHist.rows.length}`);
+    const legalSheets = [];
+    const hasLegalSheets = false;
 
     const baseMap = new Map();
     const aliasToRuc = new Map();
+    const altIdToBase = new Map();
+    const missingEmpresas = new Map();
+    const empresaTamAsignado = new Map();
+    const empresasBaseAsePorTam = new Map();
+    const empresasRawAsePorTam = new Map();
 
     base.rows.forEach((row) => {
       const ruc = padRuc13(getVal(row, base.headerIndex, ["RUC"]));
+      const altId = normalizeKey(getVal(row, base.headerIndex, ALT_ID_ALIASES));
       const razon = normalizeName(getVal(row, base.headerIndex, ["RAZON_SOCIAL", "RAZON SOCIAL", "EMPRESA"]));
-      if (!ruc && !razon) return;
-      const tam = normalizeTamano(getVal(row, base.headerIndex, ["TAMANO", "TAMANO_EMPRESA", "TAMANIO", "TAMANO"]));
+      if (!ruc && !altId && !razon) return;
+      const tam = normalizeTamano(getVal(row, base.headerIndex, ["TAMANO", "TAMANO_EMPRESA", "TAMANIO", "TAMANO_EMPRESA_", "TAMANO"]));
       const sector = normalizeSector(getVal(row, base.headerIndex, ["SECTOR", "ACTIVIDAD", "SECTOR_PRODUCTIVO"]));
-      const socioRaw = getVal(row, base.headerIndex, FILTERS.socioFieldNames || []);
-      let socio = true;
-      if (FILTERS.soloSocios) {
-        if (socioRaw === "") {
-          socio = true;
-        } else if (isNo(socioRaw, FILTERS.socioNoValues || [])) {
-          socio = false;
-        } else {
-          socio = isYes(socioRaw, FILTERS.socioYesValues || []);
-        }
-      }
-      const key = ruc || razon;
-      baseMap.set(key, { ruc, razonSocial: razon || "SIN_NOMBRE", tamano: tam || "SIN_TAMANO", sector: sector || "SIN CLASIFICAR", socio });
+      const key = ruc || altId || razon;
+      const data = {
+        baseKey: key,
+        ruc,
+        altId,
+        razonSocial: razon || "SIN_NOMBRE",
+        tamano: tam || "SIN_TAMANO",
+        sector: sector || "SIN CLASIFICAR",
+      };
+      baseMap.set(key, data);
+      if (altId) altIdToBase.set(altId, data);
       if (razon) aliasToRuc.set(razon, key);
     });
     Logger.log(`[DASH7] Empresas base: ${baseMap.size}`);
 
-    const diagnosticos = [];
+    applyManualAliases(aliasToRuc, baseMap);
+
+    const asesoriasBuckets = new Map(); // key: entity|anio (dedup por empresa y anio)
+    const asesorias = [];
     const years = new Set();
-    let djangoProcesados = 0;
+    let registrosProcesados = 0;
     let filtNo = 0;
     let filtNinguno = 0;
     let noFound = 0;
     let sinFechaRecuperados = 0;
-    let sinFechaDescartados = 0;
-    let subtipoDescartados = 0;
-    let subtipoFueraLista = 0;
-    let noSocioSoloEmpresas = 0;
-    let dedupDescartadosSocios = 0;
-    let dedupDescartadosNoSocios = 0;
-    const dedupSeenSocios = new Set();
-    const dedupSeenNoSocios = new Set();
-    const diagNoSocios = [];
+    let bucketRowsMerged = 0;
+    let debugUsefulRowsDjango = 0;
+    let debugUsefulRowsHist = 0;
+    let legalRowsProcessed = 0;
+    let useLegalSheetsOnly = false;
 
-    // Ano de referencia para filas sin fecha explicita
     let djangoFallbackYear = "";
     diagDjango.rows.forEach((row) => {
       const y = getYear(getVal(row, diagDjango.headerIndex, ["FECHA", "FECHA_DIAGNOSTICO", "FECHA DE DIAGNOSTICO"]));
       if (y && (!djangoFallbackYear || y > djangoFallbackYear)) djangoFallbackYear = y;
     });
-    if (!djangoFallbackYear) djangoFallbackYear = new Date().getFullYear().toString();
-    Logger.log(`[DASH7] Ano referencia DIAGNOSTICOS: ${djangoFallbackYear}`);
+    if (!djangoFallbackYear) djangoFallbackYear = DEFAULT_HIST_YEAR;
+    const histFallbackYear = DEFAULT_HIST_YEAR;
 
-    function resolveEmpresa(name) {
+    const hasHistInsideDjango = diagDjango.rows.some(
+      (row) => !getYear(getVal(row, diagDjango.headerIndex, ["FECHA", "FECHA_DIAGNOSTICO", "FECHA DE DIAGNOSTICO"]))
+    );
+    const shouldProcessHist = false;
+    Logger.log(`[DASH7] Historico embebido en DIAGNOSTICOS: ${hasHistInsideDjango ? "SI" : "NO"} | Procesar hoja historica aparte: NO (solo DIAGNOSTICOS)`);
+    Logger.log(`[DASH7] Ano fallback Django: ${djangoFallbackYear} | Ano fallback Historico: ${histFallbackYear}`);
+
+    function yearOrDefault(fechaRaw, fuente, fallbackYear) {
+      const y = getYear(fechaRaw);
+      if (y) return y;
+      if (fuente === "HIST") return fallbackYear || HIST_YEAR;
+      if (fuente === "DJANGO") return fallbackYear || NO_DATE_YEAR;
+      return fallbackYear || NO_DATE_YEAR;
+    }
+
+    function resolveEmpresa(name, rowForAltId, rowHeaderIndex) {
       const norm = normalizeName(name);
-      const key = aliasToRuc.get(norm) || norm;
-      const info = baseMap.get(key);
-      if (info) return info;
-      const placeholder = { ruc: "", razonSocial: norm || "SIN_NOMBRE", tamano: "SIN_TAMANO", sector: "SIN CLASIFICAR" };
-      baseMap.set(key, placeholder);
-      if (norm) aliasToRuc.set(norm, key);
+      const mappedKey = aliasToRuc.get(norm);
+      if (mappedKey) {
+        const infoMapped = baseMap.get(mappedKey) || missingEmpresas.get(mappedKey);
+        if (infoMapped) return infoMapped;
+      }
+
+      const infoByName = baseMap.get(norm);
+      if (infoByName) {
+        aliasToRuc.set(norm, infoByName.baseKey);
+        return infoByName;
+      }
+
+      if (rowForAltId) {
+        const altId = normalizeKey(getVal(rowForAltId, rowHeaderIndex || {}, ALT_ID_ALIASES));
+        if (altId) {
+          const infoAlt = altIdToBase.get(altId);
+          if (infoAlt) {
+            aliasToRuc.set(norm, infoAlt.baseKey);
+            return infoAlt;
+          }
+        }
+      }
+
+      const placeholder = {
+        baseKey: norm,
+        ruc: "",
+        altId: "",
+        razonSocial: norm || "SIN_NOMBRE",
+        tamano: "SIN_TAMANO",
+        sector: "SIN CLASIFICAR",
+        isPlaceholder: true,
+      };
+      if (norm) {
+        missingEmpresas.set(norm, placeholder);
+        aliasToRuc.set(norm, placeholder.baseKey);
+      }
       return placeholder;
     }
 
-    // Procesar hoja DIAGNOSTICOS (contiene historico + nuevos)
-    diagDjango.rows.forEach((row) => {
-      const seDiagRaw = getVal(row, diagDjango.headerIndex, ["SE_DIAGNOSTICO", "SE DIAGNOSTICO", "SE DIAGNOSTICO"]);
-      if (!isTruthyMark(seDiagRaw) || isFalsyMark(seDiagRaw)) {
-        filtNo++;
-        return;
+    function addAsesoriaAggregated(empresa, count, fechaRaw, fuente, fallbackYear, subtipoRaw) {
+      let subtipo = normalizeSubtipoLegal(subtipoRaw);
+      if (!subtipo || subtipo === "SIN SUBTIPO" || subtipo === "PENDIENTE") subtipo = "OTROS"; // reubicar sin sub
+      const anio = yearOrDefault(fechaRaw, fuente, fallbackYear);
+      const entityKey = empresa.baseKey || empresa.ruc || empresa.razonSocial;
+      const key = `${entityKey}|${anio}`;
+      let bucket = asesoriasBuckets.get(key);
+      const prevTotal = bucket ? bucket.total || 0 : 0;
+      if (!bucket) {
+        bucket = {
+          ruc: empresa.ruc,
+          razonSocial: empresa.razonSocial,
+          tamano: empresa.tamano,
+          sector: empresa.sector,
+          anio,
+          trimestre: getTrimestre(fechaRaw),
+          fuente,
+          total: 0,
+          subtipos: new Map(),
+        };
+        asesoriasBuckets.set(key, bucket);
+        years.add(anio);
+      } else {
+        if (!bucket.trimestre) bucket.trimestre = getTrimestre(fechaRaw);
+        if (!bucket.fuente && fuente) bucket.fuente = fuente;
       }
-      const tipoRaw = normalizeTipoDiagnostico(getVal(row, diagDjango.headerIndex, ["TIPO_DE_DIAGNOSTICO", "TIPO", "TIPO DIAGNOSTICO", "TIPO DE DIAGNOSTICO"]));
-      if (tipoRaw !== "LEGAL") {
-        return;
-      }
+      const newTotal = Math.max(bucket.total || 0, count);
+      const added = Math.max(0, newTotal - (bucket.total || 0));
+      bucket.total = newTotal;
 
-      const fechaRaw = getVal(row, diagDjango.headerIndex, ["FECHA", "FECHA_DIAGNOSTICO", "FECHA DE DIAGNOSTICO"]);
-      const anioFecha = getYear(fechaRaw);
-      if (!anioFecha) sinFechaRecuperados++;
-      const subtipoRaw = normalizeSubtipoDiagnostico(
-        getVal(row, diagDjango.headerIndex, ["SUBTIPO_DIAGNOSTICO", "SUBTIPO_DE_DIAGNOSTICO", "SUBTIPO", "SUBTIPO DIAGNOSTICO", "SUBTIPO DE DIAGNOSTICO", "OTROS_SUBTIPO", "OTROS SUBTIPO"])
-      );
-      if (FILTERS.dropSinSubtipo && (!subtipoRaw || subtipoRaw === "SIN SUBTIPO" || subtipoRaw === "PENDIENTE")) {
-        subtipoDescartados++;
-        return;
-      }
-      if (FILTERS.allowedSubtipos.length > 0 && !FILTERS.allowedSubtipos.includes(subtipoRaw)) {
-        subtipoFueraLista++;
-        return;
-      }
+      const prevSub = bucket.subtipos.get(subtipo) || 0;
+      const newSub = Math.max(prevSub, count);
+      bucket.subtipos.set(subtipo, newSub);
 
-      const razonRaw = getVal(row, diagDjango.headerIndex, ["RAZON_SOCIAL", "RAZON SOCIAL", "EMPRESA"]);
-      if (!razonRaw) {
+      return { added, merged: count - added > 0 ? count - added : 0 };
+    }
+
+    function markEmpresaDenominador(empresa, row, headerIndex, hasUsefulData) {
+      if (!empresa || empresa.isPlaceholder || !hasUsefulData) return false;
+      const entityKey = empresa.baseKey || empresa.ruc || empresa.razonSocial;
+      const tamAsignado = empresaTamAsignado.get(entityKey) || empresa.tamano || "SIN_TAMANO";
+      if (!empresaTamAsignado.has(entityKey)) empresaTamAsignado.set(entityKey, tamAsignado);
+      const tamKey = tamAsignado || "SIN_TAMANO";
+      if (!empresasBaseAsePorTam.has(tamKey)) empresasBaseAsePorTam.set(tamKey, new Set());
+      empresasBaseAsePorTam.get(tamKey).add(entityKey);
+
+      const rawRuc = padRuc13(getVal(row, headerIndex, ["RUC"]));
+      const rawAlt = normalizeKey(getVal(row, headerIndex, ALT_ID_ALIASES));
+      const rawName = normalizeName(getVal(row, headerIndex, ["RAZON_SOCIAL", "RAZON SOCIAL", "EMPRESA", "Razon Social"]));
+      const rawKey = rawRuc || rawAlt || rawName;
+      if (rawKey) {
+        if (!empresasRawAsePorTam.has(tamKey)) empresasRawAsePorTam.set(tamKey, new Set());
+        empresasRawAsePorTam.get(tamKey).add(rawKey);
+      }
+      return true;
+    }
+
+    if (!useLegalSheetsOnly) {
+      diagDjango.rows.forEach((row) => {
+      const razonRaw = getVal(row, diagDjango.headerIndex, ["RAZON_SOCIAL", "RAZON SOCIAL", "EMPRESA", "Razon Social"]);
+      const empresa = resolveEmpresa(razonRaw, row, diagDjango.headerIndex);
+      if (!empresa) {
         noFound++;
         return;
       }
 
-      const empresa = resolveEmpresa(razonRaw);
-      if (FILTERS.soloSocios && !empresa.socio) {
-        noSocioSoloEmpresas++;
+      const seDiagRaw = (
+        getVal(row, diagDjango.headerIndex, [
+          "SE_DIAGNOSTICO",
+          "SE DIAGNOSTICO",
+          "SE_DIAGNOSTICO_",
+          "SE DIAGNOSTICO_",
+          "TOTAL_DIAGNOSTICO",
+          "TOTAL DIAGNOSTICO",
+          "TOTAL DIAGNOSTICOS",
+          "TOTAL DIAGNOSTICOS",
+          "DIAGNOSTICO",
+        ]) || ""
+      )
+        .toString()
+        .trim()
+        .toUpperCase();
+
+      const tipoRaw = normalizeTipoDiagnostico(getVal(row, diagDjango.headerIndex, ["TIPO_DE_DIAGNOSTICO", "TIPO", "TIPO DIAGNOSTICO", "TIPO DE DIAGNOSTICO"]));
+      if (tipoRaw !== "LEGAL") {
+        if (tipoRaw === "NINGUNO") filtNinguno++;
         return;
       }
+      const subtipoRaw = getVal(row, diagDjango.headerIndex, SUBTIPO_ALIASES);
+      const legalCounts = collectLegalCount(row, diagDjango.headerIndex, tipoRaw);
+      const servicioMarcado =
+        legalCounts.hasServicio ||
+        parseCountFlexible(seDiagRaw) > 0 ||
+        parseCountFlexible(getVal(row, diagDjango.headerIndex, SERVICIO_FLAG_ALIASES)) > 0;
+      // Si es LEGAL, contar salvo que explicitamente marque NO (o similar).
+      const tookLegal = tipoRaw === "LEGAL" && (servicioMarcado || !shouldSkipDiagnosticoFlag(seDiagRaw));
+      const fechaRaw = getVal(row, diagDjango.headerIndex, ["FECHA", "FECHA_DIAGNOSTICO", "FECHA DE DIAGNOSTICO"]);
+      const hasDate = !!getYear(fechaRaw);
 
-      const diagObj = {
-        ruc: empresa.ruc,
-        razonSocial: empresa.razonSocial,
-        tamano: empresa.tamano,
-        sector: empresa.sector,
-        tipoDiagnostico: "LEGAL",
-        subtipoDiagnostico: subtipoRaw,
-        anio: anioFecha || djangoFallbackYear,
-        trimestre: "",
-        fuente: "DIAGNOSTICOS",
-      };
+      const tiposDet = TYPE_COLUMNS.map((col) => parseCountFlexible(getVal(row, diagDjango.headerIndex, [col]))).filter((v) => v > 0);
+      const hasLegalData = tookLegal; // Solo contamos si realmente tomo servicio legal
+      const hasUsefulData = hasLegalData || !!seDiagRaw || tiposDet.length > 0;
 
-      diagnosticos.push(diagObj);
-      years.add(diagObj.anio);
-      djangoProcesados++;
+      if (markEmpresaDenominador(empresa, row, diagDjango.headerIndex, hasUsefulData)) debugUsefulRowsDjango++;
+
+      if (!hasLegalData && shouldSkipDiagnosticoFlag(seDiagRaw)) {
+        filtNo++;
+        return;
+      }
+      if (!hasLegalData) return;
+
+      const count = tookLegal ? Math.max(legalCounts.total || 0, 1) : 0;
+      if (!hasDate) sinFechaRecuperados += count;
+      if (count === 0) return;
+      const result = addAsesoriaAggregated(
+        empresa,
+        count,
+        fechaRaw,
+        hasDate ? "DJANGO" : "HIST",
+        hasDate ? djangoFallbackYear : histFallbackYear,
+        subtipoRaw
+      );
+      registrosProcesados += result.added;
+      bucketRowsMerged += result.merged;
+      });
+    }
+
+    if (shouldProcessHist && !useLegalSheetsOnly) {
+      Logger.log("[DASH7] Hoja historica omitida (solo DIAGNOSTICOS activos).");
+    } else {
+      Logger.log("[DASH7] Hoja historica no procesada (ya viene en DIAGNOSTICOS o no existe).");
+    }
+
+    asesoriasBuckets.forEach((bucket) => {
+      let remaining = bucket.total || 0;
+      if (remaining <= 0) return;
+
+      const subtipoEntries = Array.from(bucket.subtipos.entries()).sort((a, b) => {
+        const diff = (b[1] || 0) - (a[1] || 0);
+        if (diff !== 0) return diff;
+        return a[0].localeCompare(b[0]);
+      });
+
+      subtipoEntries.forEach(([subtipo, cnt]) => {
+        if (remaining <= 0) return;
+        const useCount = Math.min(cnt || 0, remaining);
+        if (useCount <= 0) return;
+        asesorias.push({
+          ruc: bucket.ruc,
+          razonSocial: bucket.razonSocial,
+          tamano: bucket.tamano,
+          sector: bucket.sector,
+          tipoDiagnostico: "LEGAL",
+          subtipoDiagnostico: subtipo,
+          anio: bucket.anio,
+          trimestre: bucket.trimestre,
+          fuente: bucket.fuente,
+          cantidad: useCount,
+        });
+        remaining -= useCount;
+      });
+
+      if (remaining > 0) {
+        asesorias.push({
+          ruc: bucket.ruc,
+          razonSocial: bucket.razonSocial,
+          tamano: bucket.tamano,
+          sector: bucket.sector,
+          tipoDiagnostico: "LEGAL",
+          subtipoDiagnostico: "OTROS",
+          anio: bucket.anio,
+          trimestre: bucket.trimestre,
+          fuente: bucket.fuente,
+          cantidad: remaining,
+        });
+      }
     });
 
-    Logger.log(`[DASH7] Diagnosticos procesados: ${djangoProcesados}`);
+    const totalEventos = asesorias.reduce((acc, d) => acc + (d.cantidad || 1), 0);
     Logger.log("[DASH7] ===== RESUMEN =====");
-    Logger.log(`Django procesados: ${djangoProcesados}`);
+    Logger.log(`Registros procesados: ${registrosProcesados}`);
     Logger.log(`Filtrados 'No': ${filtNo}`);
     Logger.log(`Filtrados 'ninguno': ${filtNinguno}`);
     Logger.log(`No encontrados en base: ${noFound}`);
-    Logger.log(`Descartados sin fecha (Django): ${sinFechaDescartados}`);
-    Logger.log(`Descartados sin subtipo/pendiente: ${subtipoDescartados}`);
-    Logger.log(`Descartados fuera de lista permitida: ${subtipoFueraLista}`);
-    Logger.log(`No socios (solo tabla empresas): ${noSocioSoloEmpresas}`);
-    Logger.log(`Descartados por dedup socios (${FILTERS.dedupStrategy}): ${dedupDescartadosSocios}`);
-    Logger.log(`Descartados por dedup no socios (${FILTERS.dedupStrategy}): ${dedupDescartadosNoSocios}`);
-    Logger.log(`Sin fecha (recuperados con fallback): ${sinFechaRecuperados}`);
-    Logger.log(`Total asesorias: ${diagnosticos.length}`);
+    Logger.log(`Sin fecha (recuperados): ${sinFechaRecuperados}`);
+    Logger.log(`Filas consolidadas en bucket (empresa|anio): ${bucketRowsMerged}`);
+    Logger.log(`Total asesorias (eventos): ${totalEventos} | buckets: ${asesoriasBuckets.size} | filas salida: ${asesorias.length}`);
+    Logger.log(`[DASH7 DEBUG] Filas utiles DIAGNOSTICOS: ${debugUsefulRowsDjango} | HIST: ${debugUsefulRowsHist}`);
+    const tamanosDebug = ["MICRO", "PEQUENA", "MEDIANA", "GRANDE", "SIN_TAMANO"];
+    tamanosDebug.forEach((t) => {
+      const setBase = empresasBaseAsePorTam.get(t);
+      const setRaw = empresasRawAsePorTam.get(t);
+      Logger.log(`[DASH7 DEBUG] Empresas utiles (baseKey) - ${t}: ${setBase ? setBase.size : 0} | rawKey: ${setRaw ? setRaw.size : 0}`);
+    });
+    const totalEmpBase = Array.from(empresasBaseAsePorTam.values()).reduce((acc, s) => acc + s.size, 0);
+    const totalEmpRaw = Array.from(empresasRawAsePorTam.values()).reduce((acc, s) => acc + s.size, 0);
+    Logger.log(`[DASH7 DEBUG] Empresas utiles totales (baseKey): ${totalEmpBase} | (rawKey): ${totalEmpRaw}`);
 
     const yearsList = Array.from(years).sort((a, b) => yearRank(b) - yearRank(a));
     Logger.log(`Anios detectados: ${yearsList.join(", ")}`);
 
-    generateAsesoriasResumenTable(baseMap, diagnosticos, yearsList);
-    generateAsesoriasSubtipoTable(diagnosticos, yearsList);
-    generateAsesoriasPorEmpresaTable(diagnosticos, yearsList, diagNoSocios);
+    generateAsesoriasResumenTable(baseMap, asesorias, yearsList, empresasBaseAsePorTam, empresasRawAsePorTam);
+    generateAsesoriasSubtipoTable(asesorias, yearsList);
+    generateAsesoriasPorEmpresaTable(asesorias, yearsList);
     generateSlicerMasterSheet();
 
     Logger.log("[DASH7] Completado");
@@ -421,23 +702,32 @@
     return -3;
   }
 
-  function generateAsesoriasResumenTable(baseMap, diagnosticos, years) {
+  function generateAsesoriasResumenTable(baseMap, asesorias, years, baseAseMap, rawAseMap) {
     const rows = [];
     const header = ["ANIO", "TAMANO", "TOTAL_ASESORIAS", "EMPRESAS_CON_ASE", "EMPRESAS_SIN_ASE", "EMPRESAS_TOTALES"];
     const empresasPorTam = new Map();
-    baseMap.forEach((info) => {
-      const tam = info.tamano || "SIN_TAMANO";
-      if (!empresasPorTam.has(tam)) empresasPorTam.set(tam, new Set());
-      empresasPorTam.get(tam).add(info.ruc || info.razonSocial);
-    });
+    const sourceMap = rawAseMap && rawAseMap.size ? rawAseMap : baseAseMap && baseAseMap.size ? baseAseMap : null;
+    if (sourceMap) {
+      sourceMap.forEach((set, tam) => {
+        if (!empresasPorTam.has(tam)) empresasPorTam.set(tam, new Set());
+        set.forEach((val) => empresasPorTam.get(tam).add(val));
+      });
+    } else {
+      baseMap.forEach((info) => {
+        const tam = info.tamano || "SIN_TAMANO";
+        if (!empresasPorTam.has(tam)) empresasPorTam.set(tam, new Set());
+        empresasPorTam.get(tam).add(info.baseKey || info.ruc || info.razonSocial);
+      });
+    }
     const tamanos = ["MICRO", "PEQUENA", "MEDIANA", "GRANDE", "SIN_TAMANO"];
 
     years.forEach((anio) => {
       tamanos.forEach((tam) => {
-        const diags = diagnosticos.filter((d) => d.anio === anio && d.tamano === tam);
+        const diags = asesorias.filter((d) => d.anio === anio && d.tamano === tam);
+        const totalDiag = diags.reduce((acc, d) => acc + (d.cantidad || 1), 0);
         const empresasSet = new Set(diags.map((d) => d.ruc || d.razonSocial));
         const totalEmp = empresasPorTam.get(tam)?.size || 0;
-        rows.push([anio, tam, diags.length, empresasSet.size, Math.max(0, totalEmp - empresasSet.size), totalEmp]);
+        rows.push([anio, tam, totalDiag, empresasSet.size, Math.max(0, totalEmp - empresasSet.size), totalEmp]);
       });
     });
 
@@ -457,19 +747,19 @@
     Logger.log(`[DASH7] ${SHEETS.OUT_RESUMEN}: ${rows.length} filas`);
   }
 
-  function generateAsesoriasSubtipoTable(diagnosticos, years) {
+  function generateAsesoriasSubtipoTable(asesorias, years) {
     const rows = [];
     const header = ["ANIO", "TAMANO", "SUBTIPO", "CANTIDAD", "PCT"];
     const tamanos = ["MICRO", "PEQUENA", "MEDIANA", "GRANDE", "SIN_TAMANO"];
 
     years.forEach((anio) => {
       tamanos.forEach((tam) => {
-        const diags = diagnosticos.filter((d) => d.anio === anio && d.tamano === tam);
-        const total = diags.length;
+        const diags = asesorias.filter((d) => d.anio === anio && d.tamano === tam);
+        const total = diags.reduce((acc, d) => acc + (d.cantidad || 1), 0);
         const porSubtipo = new Map();
         diags.forEach((d) => {
           const key = d.subtipoDiagnostico || "SIN SUBTIPO";
-          porSubtipo.set(key, (porSubtipo.get(key) || 0) + 1);
+          porSubtipo.set(key, (porSubtipo.get(key) || 0) + (d.cantidad || 1));
         });
         porSubtipo.forEach((count, key) => {
           rows.push([anio, tam, key, count, total > 0 ? (count / total) * 100 : 0]);
@@ -493,24 +783,22 @@
     Logger.log(`[DASH7] ${SHEETS.OUT_SUBTIPO}: ${rows.length} filas`);
   }
 
-  function generateAsesoriasPorEmpresaTable(diagnosticos, years, diagExtraNoSocios = []) {
+  function generateAsesoriasPorEmpresaTable(asesorias, years) {
     const rows = [];
     const header = ["ANIO", "TAMANO", "RUC", "RAZON_SOCIAL", "SECTOR", "TOTAL_ASESORIAS", "SUBTIPOS_TOMADOS", "RANK"];
     const tamanos = ["MICRO", "PEQUENA", "MEDIANA", "GRANDE", "SIN_TAMANO"];
 
     years.forEach((anio) => {
       tamanos.forEach((tam) => {
-        const diags = diagnosticos.filter((d) => d.anio === anio && d.tamano === tam);
-        const diagsExtra = diagExtraNoSocios.filter((d) => d.anio === anio && d.tamano === tam);
-        const source = diags.concat(diagsExtra);
+        const diags = asesorias.filter((d) => d.anio === anio && d.tamano === tam);
         const porEmp = new Map();
-        source.forEach((d) => {
+        diags.forEach((d) => {
           const key = d.ruc || d.razonSocial;
           if (!porEmp.has(key)) {
             porEmp.set(key, { ruc: d.ruc, razonSocial: d.razonSocial, sector: d.sector, count: 0, subtipos: new Set() });
           }
           const item = porEmp.get(key);
-          item.count++;
+          item.count += d.cantidad || 1;
           item.subtipos.add(d.subtipoDiagnostico);
         });
         const lista = Array.from(porEmp.values()).sort((a, b) => b.count - a.count);
@@ -617,7 +905,11 @@
 
   function getSheetNameFlexible(preferred) {
     const ss = SpreadsheetApp.getActive();
-    if (ss.getSheetByName(preferred)) return preferred;
+    if (ss.getSheetByName(preferred)) {
+      Logger.log(`[DASH7] Hoja encontrada (exacta): ${preferred}`);
+      return preferred;
+    }
+
     const sheets = ss.getSheets();
     const preferredNorm = normalizeLabel(preferred);
     let best = null;
@@ -629,11 +921,12 @@
       if (rowCount === 0) return null;
       const hasLegalCols =
         info.headerIndex["LEGAL"] !== undefined ||
-        info.headerIndex["LEGALES"] !== undefined ||
-        info.headerIndex["DIAGNOSTICO_LEGAL"] !== undefined ||
-        info.headerIndex["ASPECTOS LEGALES"] !== undefined ||
-        info.headerIndex["JURIDICO"] !== undefined ||
-        info.headerIndex["D_LEGAL"] !== undefined;
+        info.headerIndex["LEGAL_1"] !== undefined ||
+        info.headerIndex["LEGAL1"] !== undefined ||
+        info.headerIndex["LEGAL_2"] !== undefined ||
+        info.headerIndex["ASESORIA_LEGAL"] !== undefined ||
+        info.headerIndex["ASESORIAS_LEGALES"] !== undefined ||
+        info.headerIndex["SERVICIO_LEGAL"] !== undefined;
       return { rowCount, hasLegalCols };
     }
 
@@ -645,20 +938,31 @@
       const meta = scoreSheet(name);
       if (!meta) return;
       const { rowCount, hasLegalCols } = meta;
+
       if ((norm === preferredNorm || norm === "DIAGNOSTICOS") && rowCount > 0 && hasLegalCols) {
         best = name;
         bestScore = rowCount + 1000;
+        Logger.log(`[DASH7] Hoja historica encontrada (preferida): ${name} (${rowCount} filas)`);
         return;
       }
+
       if (norm.indexOf("DIAGNOST") !== -1 && hasLegalCols && rowCount >= 5) {
         const score = rowCount;
         if (score > bestScore) {
           best = name;
           bestScore = score;
+          Logger.log(`[DASH7] Candidato de hoja historica: ${name} (score: ${score})`);
         }
       }
     });
-    return best || null;
+
+    if (best) {
+      Logger.log(`[DASH7] Hoja historica seleccionada: ${best} (score: ${bestScore})`);
+      return best;
+    }
+
+    Logger.log("[DASH7] Advertencia: No se encontro hoja historica (DIAGNOSTICO)");
+    return null;
   }
 
   function refreshDashboardAsesorias() {
@@ -669,7 +973,6 @@
     SpreadsheetApp.getUi().createMenu("DASH7").addItem("Generar asesorias", "refreshDashboardAsesorias").addToUi();
   }
 
-  // Trigger manual via checkbox (hoja REPORTE_2, celda Q53)
   const DASH7_TRIGGER_SHEET = "REPORTE_2";
   const DASH7_TRIGGER_CELL = "Q53";
 
@@ -683,13 +986,13 @@
     const val = range.getValue();
     if (val === true) {
       const ss = SpreadsheetApp.getActive();
-      ss.toast("Actualizando dashboard…");
+      ss.toast("Actualizando dashboard.");
       try {
         refreshDashboardAsesorias();
         ss.toast("Dashboard listo.");
         sheet.getRange("Q54").setValue("Ultima actualizacion: " + new Date());
       } finally {
-        range.setValue(false); // deja la casilla lista para el siguiente clic
+        range.setValue(false);
       }
     }
   }
@@ -703,20 +1006,10 @@ function refreshDashboardAsesoriasWrapper() {
   return refreshDashboardAsesorias();
 }
 
-// Wrapper para que el trigger instalable detecte la función onEditDash7
 function onEditDash7Wrapper(e) {
   return onEditDash7(e);
 }
 
-// Wrapper opcional para onOpenDash7 si se requiere trigger instalable
 function onOpenDash7Wrapper() {
   return onOpenDash7();
 }
-
-
-
-
-
-
-
-

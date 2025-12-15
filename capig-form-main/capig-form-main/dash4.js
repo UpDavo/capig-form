@@ -186,7 +186,7 @@
         for (const colName in headerIndex) {
             if (EXCLUDED_PATTERNS.some((pattern) => pattern.test(colName))) continue;
 
-            const matchT = colName.match(/^T(\d{4})$/);
+            const matchT = colName.match(/^T_?(\d{4})$/);
             if (matchT) {
                 const year = parseInt(matchT[1], 10);
                 const colIndex = headerIndex[colName];
