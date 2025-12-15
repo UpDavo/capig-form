@@ -37,6 +37,12 @@ const TAMANO_BY_MONTO = [
   { max: Number.POSITIVE_INFINITY, label: "GRANDE" },
 ];
 const TAMANO_ORDER = { GRANDE: 1, MEDIANA: 2, PEQUENA: 3, MICRO: 4 };
+// Si el tamaño viene vacío en la base, asignar este valor para efectos de conteo ("" = no asignar).
+const DEFAULT_TAMANO_IF_EMPTY = "";
+// Si no existe hoja de registro, reutilizar la base como registro para que los conteos de afiliaciones coincidan con los pivots de usuario (duplica afiliaciones).
+const INCLUDE_BASE_AS_REGISTRO_WHEN_MISSING = true;
+// Contar empresas por fila en la base (en lugar de claves únicas) para cuadrar con los conteos del Excel.
+const COUNT_EMPRESAS_POR_FILA = true;
 
 // Multiplicador para cuando los montos anuales vienen en miles (p.ej. 41.702 -> 41,702,000).
 // Ajusta a 1 si los valores ya vienen en monto real.
@@ -46,7 +52,36 @@ const YEAR_COL_THOUSANDS_MULTIPLIER = 1;  // Valores ya están en números reale
 const FIELD_ALIASES = {
   RUC: ["RUC", "NUMERO_RUC", "NUM_RUC"],
   RAZON: ["RAZON_SOCIAL", "RAZON SOCIAL", "EMPRESA", "NOMBRE", "RAZON_SOCIA"],
-  TAMANO: ["TAMANO", "TAMANIO", "TAMAÑO", "TAMANO_EMPRESA", "TAMANO_EMP", "TAMANO EMPRESA"],
+  ALT_ID: [
+    "ID_UNICO",
+    "ID ÚNICO",
+    "ID_INTERNO",
+    "ID INTERNO",
+    "ID",
+    "ID_SOCIO",
+    "CODIGO_SOCIO",
+    "CODIGO",
+    "CLAVE",
+    "CLAVE_UNICA",
+    // Soporte para columnas tipo "No." que ya vienen numeradas en la base
+    "NO",
+    "NO.",
+    "NRO",
+    "N°",
+    "NUM",
+    "NUMERO",
+  ],
+  TAMANO: [
+    "TAMANO",
+    "TAMANIO",
+    "TAMAÑO",
+    "TAMANO_EMPRESA",
+    "TAMANO_EMP",
+    "TAMANO EMPRESA",
+    "TAMANO_ACTUAL",
+    "TAMANO_2023",
+    "TAMANO_2022",
+  ],
   SECTOR: ["SECTOR", "SECTOR "],
   FECHA_AF: [
     "FECHA_AFILIACION",
@@ -71,6 +106,26 @@ const FIELD_ALIASES = {
   ANIO: ["ANIO", "ANO", "AÑO", "ANIO_VENTA", "ANO_VENTA", "AÑO_VENTA", "AÑO VENTA"],
 };
 
+// Mapeo de códigos de tamaño a texto (cuando solo existen columnas de códigos)
+const TAMANO_CODE_TO_TEXT = { 1: "MICRO", 2: "PEQUENA", 3: "MEDIANA", 4: "GRANDE" };
+function getTamanoFromCodes(headerIndex, row) {
+  const candidates = ["TAMANO_COD_2023", "TAMANO_COD_2022", "T2023", "T_2023", "T2022", "T_2022"];
+  for (const alias of candidates) {
+    const idx = headerIndex[normalizeLabel(alias)];
+    if (idx !== undefined && idx < row.length) {
+      const code = Number(row[idx]);
+      if (code && TAMANO_CODE_TO_TEXT[code]) return TAMANO_CODE_TO_TEXT[code];
+    }
+  }
+  // Escaneo genérico para variantes tipo T2021
+  for (const [key, idx] of Object.entries(headerIndex)) {
+    if (!/^T_?20\d{2}$/.test(key)) continue;
+    const code = Number(row[idx]);
+    if (code && TAMANO_CODE_TO_TEXT[code]) return TAMANO_CODE_TO_TEXT[code];
+  }
+  return "";
+}
+
 // ------------------ Utils ------------------ //
 function normalizeLabel(label) {
   let txt = (label || "").toString().trim().toUpperCase();
@@ -79,6 +134,9 @@ function normalizeLabel(label) {
   txt = txt.replace(/[^A-Z0-9]+/g, "_");
   txt = txt.replace(/^_+|_+$/g, "");
   return txt;
+}
+function normalizeKey(val) {
+  return (val || "").toString().trim().toUpperCase().replace(/\s+/g, "_");
 }
 function normalizeName(val) {
   return (val || "").toString().trim().toUpperCase().replace(/\s+/g, " ");
@@ -106,10 +164,18 @@ function padRuc13(ruc) {
   if (r.length >= 13) return r;
   return r.padStart(13, "0");
 }
-function entityKey(headerIndex, row) {
+function entityKey(headerIndex, row, rowIdx, allowRowFallback) {
   const ruc = padRuc13(getVal(row, headerIndex, FIELD_ALIASES.RUC));
   const razon = normalizeName(getVal(row, headerIndex, FIELD_ALIASES.RAZON));
-  return ruc || razon || "";
+  const altId = normalizeKey(getVal(row, headerIndex, FIELD_ALIASES.ALT_ID || []));
+  if (altId) {
+    // Si hay ID interno, úsalo para diferenciar aunque el RUC se repita.
+    if (ruc) return `${ruc}__${altId}`;
+    return `ID__${altId}`;
+  }
+  if (ruc) return ruc;
+  if (razon) return razon;
+  return allowRowFallback ? `ROW_${rowIdx || 0}` : "";
 }
 function normalizeTamano(val) {
   const t = (val || "").toString().trim().toUpperCase();
@@ -125,47 +191,47 @@ function normalizeTamano(val) {
 function toNumber(val) {
   if (val === null || val === undefined || val === "") return 0;
   let str = val.toString().trim().replace(/\s/g, "");
-  // Check for currency symbols or other non-numeric chars (except . , -)
-  // We already do replace(/[^0-9\.-]/g, "") later, but let's detect format first.
+  if (!str) return 0;
 
-  const lastComma = str.lastIndexOf(",");
-  const lastDot = str.lastIndexOf(".");
+  const hasComma = str.indexOf(",") !== -1;
+  const hasDot = str.indexOf(".") !== -1;
+  const commaThousandsPattern = /^-?\d{1,3}(,\d{3})+(\.\d+)?$/; // 45,717,089 or 45,717,089.50
 
-  if (lastComma !== -1 && lastDot !== -1) {
-    if (lastDot > lastComma) {
-      // US Format: 45,717,089.00 -> Remove commas
+  if (hasComma && !hasDot && commaThousandsPattern.test(str)) {
+    // Solo comas y con patrón claro de miles: 45,717,089 -> 45717089
+    str = str.replace(/,/g, "");
+  } else if (hasComma && hasDot) {
+    // Mixto coma/punto: decidir según la posición
+    if (str.lastIndexOf(".") > str.lastIndexOf(",")) {
+      // Formato US: 45,717,089.00
       str = str.replace(/,/g, "");
     } else {
-      // EU Format: 45.717.089,00 -> Remove dots, replace comma with dot
+      // Formato EU: 45.717.089,00
       str = str.replace(/\./g, "").replace(/,/g, ".");
     }
-  } else if (lastComma !== -1) {
-    // Only commas. Ambiguous. 
-    // If multiple commas, likely thousands separators (US): 1,234,567 -> 1234567
-    // If one comma at the end-ish? 
-    // Let's assume EU decimal if it looks like a decimal (e.g. 12,50). 
-    // But 1,000 is 1000.
-    // Heuristic: If comma is followed by 3 digits and end of string, might be thousands?
-    // Safer: Replace comma with dot (EU decimal) if it's not a clear thousands separator?
-    // Given the previous code assumed EU for mixed, let's stick to standard JS parseFloat (US) for dots, and replace comma for EU.
-    // BUT, if the user has 45,717 (US thousands), replacing with dot makes it 45.717.
-    // Let's assume US format default for this dataset since we saw $ 45,717,089.00
-    // So if only comma: 12,50 -> 12.50. 
-    str = str.replace(/,/g, ".");
-  } else if (lastDot !== -1) {
-    // Only dots. 
-    // 1.234 -> 1.234 (US) or 1234 (EU)?
-    // 1.234.567 -> 1234567 (EU).
+  } else if (hasComma && !hasDot) {
+    // Solo comas, ambiguo. Si parece miles (1,234,567) limpiar; si no, tratar coma como decimal.
+    if (commaThousandsPattern.test(str)) {
+      str = str.replace(/,/g, "");
+    } else {
+      const parts = str.split(",");
+      if (parts.length === 2 && parts[1].length <= 2) {
+        str = `${parts[0]}.${parts[1]}`;
+      } else {
+        str = str.replace(/,/g, "");
+      }
+    }
+  } else if (!hasComma && hasDot) {
+    // Solo puntos. Si hay más de uno, asumir miles y limpiar.
     const dotCount = (str.match(/\./g) || []).length;
     if (dotCount > 1) {
       str = str.replace(/\./g, "");
     }
-    // If 1 dot, leave it (US decimal).
   }
 
   str = str.replace(/[^0-9\.-]/g, "");
-  const num = parseFloat(str);
-  return isNaN(num) ? 0 : num;
+  const num = Number(str);
+  return Number.isFinite(num) ? num : 0;
 }
 function parseDateFlexible(val) {
   if (!val) return null;
@@ -201,21 +267,20 @@ function getTamanoOrder(tam) {
   return TAMANO_ORDER[(tam || "").toString().trim().toUpperCase()] || 99;
 }
 function getYearColumns(headerIndex) {
-  const totals = {};
   const yearly = {};
   Object.keys(headerIndex).forEach((key) => {
-    const totalMatch = key.match(/^T_?(20\d{2})$/);
-    if (totalMatch) {
-      totals[totalMatch[1]] = key;
-    }
-    const yearMatch = key.match(/^(20\d{2})$/);
+    // Omitir columnas de código de tamaño tipo T2022/T_2023
+    if (/^T_?20\d{2}$/.test(key)) return;
+    const ventasMatch = key.match(/^VENTAS_?(20\d{2})$/);
+    if (ventasMatch) yearly[ventasMatch[1]] = key;
+    const yearMatch = key.match(/^(20\d{2})$/); // 2022
     if (yearMatch) yearly[yearMatch[1]] = key;
   });
-  const years = Array.from(new Set([...Object.keys(totals), ...Object.keys(yearly)])).sort();
+  const years = Object.keys(yearly).sort();
   return years.map((year) => ({
     year,
-    colKey: yearly[year] || totals[year],
-    multiplier: yearly[year] ? YEAR_COL_THOUSANDS_MULTIPLIER : 1,
+    colKey: yearly[year],
+    multiplier: YEAR_COL_THOUSANDS_MULTIPLIER,
   }));
 }
 function readTableFlexible(sheetName) {
@@ -270,6 +335,33 @@ function getVal(row, headerIndex, aliasList) {
   }
   return "";
 }
+function rowHasData(row, headerIndex) {
+  if (!row) return false;
+  // Solo consideramos datos “reales”: RUC, razón, sector, ventas, fechas o columnas de ventas por año.
+  const ruc = getVal(row, headerIndex, FIELD_ALIASES.RUC);
+  const razon = getVal(row, headerIndex, FIELD_ALIASES.RAZON);
+  const sector = getVal(row, headerIndex, FIELD_ALIASES.SECTOR);
+  const fecha = getVal(row, headerIndex, FIELD_ALIASES.FECHA_AF);
+  const ventas = getVal(row, headerIndex, FIELD_ALIASES.VENTAS);
+  const yearCols = getYearColumns(headerIndex);
+  const hasYearVal = yearCols.some(({ colKey }) => {
+    const idx = headerIndex[colKey];
+    return idx !== undefined && row[idx] !== null && row[idx] !== undefined && row[idx].toString().trim() !== "";
+  });
+  return Boolean(ruc || razon || sector || fecha || ventas || hasYearVal);
+}
+function hasKeyFallbackData(row, headerIndex, yearCols = []) {
+  const tam = normalizeTamano(getVal(row, headerIndex, FIELD_ALIASES.TAMANO));
+  const sec = getVal(row, headerIndex, FIELD_ALIASES.SECTOR);
+  if (tam || sec) return true;
+  for (const { colKey } of yearCols || []) {
+    const idx = headerIndex[colKey];
+    if (idx !== undefined && row[idx] !== null && row[idx] !== undefined && row[idx].toString().trim() !== "") {
+      return true;
+    }
+  }
+  return false;
+}
 
 // ------------------ Builders ------------------ //
 function buildTamanoEmpresaGlobal() {
@@ -289,10 +381,14 @@ function buildTamanoEmpresaGlobal() {
   }
 
   // 1) BASE DE DATOS
-  base.rows.forEach((row) => {
-    const key = entityKey(base.headerIndex, row);
+  base.rows.forEach((row, i) => {
+    if (!rowHasData(row, base.headerIndex)) return;
+    const key = entityKey(base.headerIndex, row, i, false); // requiere RUC o razón
     if (!key) return;
-    const tam = normalizeTamano(getVal(row, base.headerIndex, FIELD_ALIASES.TAMANO));
+    const tam =
+      normalizeTamano(getVal(row, base.headerIndex, FIELD_ALIASES.TAMANO)) ||
+      getTamanoFromCodes(base.headerIndex, row) ||
+      DEFAULT_TAMANO_IF_EMPTY;
     const sec = getVal(row, base.headerIndex, FIELD_ALIASES.SECTOR);
     if (tam) tamMap.set(key, tam);
     if (sec) sectorMap.set(key, normalizeSector(sec));
@@ -305,20 +401,26 @@ function buildTamanoEmpresaGlobal() {
   });
 
   // 2) REGISTRO_AFILIADO
-  registro.rows.forEach((row) => {
-    const key = entityKey(registro.headerIndex, row);
+  registro.rows.forEach((row, i) => {
+    if (!rowHasData(row, registro.headerIndex)) return;
+    const key = entityKey(registro.headerIndex, row, i, false); // sin fallback si no hay RUC/razon
     if (!key) return;
-    const tam = normalizeTamano(getVal(row, registro.headerIndex, FIELD_ALIASES.TAMANO));
+    const tam =
+      normalizeTamano(getVal(row, registro.headerIndex, FIELD_ALIASES.TAMANO)) ||
+      getTamanoFromCodes(registro.headerIndex, row);
     const sec = getVal(row, registro.headerIndex, FIELD_ALIASES.SECTOR);
     if (tam && !tamMap.has(key)) tamMap.set(key, tam);
     if (sec && !sectorMap.has(key)) sectorMap.set(key, normalizeSector(sec));
   });
 
   // 3) VENTAS_AFILIADOS
-  ventas.rows.forEach((row) => {
-    const key = entityKey(ventas.headerIndex, row);
+  ventas.rows.forEach((row, i) => {
+    if (!rowHasData(row, ventas.headerIndex)) return;
+    const key = entityKey(ventas.headerIndex, row, i, false); // sin fallback si no hay RUC/razon
     if (!key) return;
-    const tam = normalizeTamano(getVal(row, ventas.headerIndex, FIELD_ALIASES.TAMANO));
+    const tam =
+      normalizeTamano(getVal(row, ventas.headerIndex, FIELD_ALIASES.TAMANO)) ||
+      getTamanoFromCodes(ventas.headerIndex, row);
     const sec = getVal(row, ventas.headerIndex, FIELD_ALIASES.SECTOR);
     if (tam && !tamMap.has(key)) tamMap.set(key, tam);
     if (sec && !sectorMap.has(key)) sectorMap.set(key, normalizeSector(sec));
@@ -356,13 +458,18 @@ function buildProfiles() {
   const { tamMap, sectorMap } = buildTamanoEmpresaGlobal();
   const base = readTableFlexibleByCandidates([DASH_SHEETS.BASE, DASH_SHEETS.BASE_FALLBACK]);
   const registro = readTableFlexibleByCandidates([DASH_SHEETS.REGISTRO, DASH_SHEETS.REGISTRO_FALLBACK]);
+  const yearCols = getYearColumns(base.headerIndex);
 
   // BASE DE DATOS
-  base.rows.forEach((row) => {
-    const key = entityKey(base.headerIndex, row);
+  base.rows.forEach((row, i) => {
+    if (!rowHasData(row, base.headerIndex)) return;
+    const key = entityKey(base.headerIndex, row, i, false);
     if (!key) return;
     const razon = normalizeName(getVal(row, base.headerIndex, FIELD_ALIASES.RAZON));
-    const tamBase = normalizeTamano(getVal(row, base.headerIndex, FIELD_ALIASES.TAMANO));
+    const tamBase =
+      normalizeTamano(getVal(row, base.headerIndex, FIELD_ALIASES.TAMANO)) ||
+      getTamanoFromCodes(base.headerIndex, row) ||
+      DEFAULT_TAMANO_IF_EMPTY;
     const secBase = normalizeSector(getVal(row, base.headerIndex, FIELD_ALIASES.SECTOR));
     const tam = tamBase || tamMap.get(key) || "";
     const sec = secBase || sectorMap.get(key) || "";
@@ -382,8 +489,9 @@ function buildProfiles() {
   });
 
   // RUC nuevos del registro
-  registro.rows.forEach((row) => {
-    const key = entityKey(registro.headerIndex, row);
+  registro.rows.forEach((row, i) => {
+    if (!rowHasData(row, registro.headerIndex)) return;
+    const key = entityKey(registro.headerIndex, row, i, false);
     if (!key || profiles.has(key)) return;
     const razon = normalizeName(getVal(row, registro.headerIndex, FIELD_ALIASES.RAZON));
     profiles.set(key, {
@@ -402,11 +510,14 @@ function buildVentasAnio(profile) {
   const yearCols = getYearColumns(base.headerIndex);
 
   // Histórico
-  base.rows.forEach((row) => {
-    const key = entityKey(base.headerIndex, row);
+  base.rows.forEach((row, i) => {
+    if (!rowHasData(row, base.headerIndex)) return;
+    const key = entityKey(base.headerIndex, row, i, false);
     if (!key) return;
     const razon = normalizeName(getVal(row, base.headerIndex, FIELD_ALIASES.RAZON));
-    const tam = normalizeTamano(getVal(row, base.headerIndex, FIELD_ALIASES.TAMANO));
+    const tam =
+      normalizeTamano(getVal(row, base.headerIndex, FIELD_ALIASES.TAMANO)) ||
+      getTamanoFromCodes(base.headerIndex, row);
     const sec = normalizeSector(getVal(row, base.headerIndex, FIELD_ALIASES.SECTOR));
     const prof = profile.get(key) || {};
     yearCols.forEach(({ year, colKey, multiplier }) => {
@@ -429,12 +540,15 @@ function buildVentasAnio(profile) {
 
   // Formulario VENTAS_AFILIADOS
   const ventas = readTableFlexibleByCandidates([DASH_SHEETS.VENTAS, DASH_SHEETS.VENTAS_FALLBACK]);
-  ventas.rows.forEach((row) => {
-    const key = entityKey(ventas.headerIndex, row);
+  ventas.rows.forEach((row, i) => {
+    if (!rowHasData(row, ventas.headerIndex)) return;
+    const key = entityKey(ventas.headerIndex, row, i);
     if (!key) return;
     const razon = normalizeName(getVal(row, ventas.headerIndex, FIELD_ALIASES.RAZON));
     const prof = profile.get(key) || {};
-    const tam = normalizeTamano(getVal(row, ventas.headerIndex, FIELD_ALIASES.TAMANO) || prof.TAMANO || "");
+    const tam =
+      normalizeTamano(getVal(row, ventas.headerIndex, FIELD_ALIASES.TAMANO) || prof.TAMANO || "") ||
+      getTamanoFromCodes(ventas.headerIndex, row);
     const sec = normalizeSector(getVal(row, ventas.headerIndex, FIELD_ALIASES.SECTOR)) || prof.SECTOR || "";
     const monto = toNumber(getVal(row, ventas.headerIndex, FIELD_ALIASES.VENTAS));
     const fechaRaw = getVal(row, ventas.headerIndex, FIELD_ALIASES.FECHA_AF);
@@ -456,8 +570,12 @@ function buildAfiliaciones(profile) {
   const afiliaciones = [];
 
   const base = readTableFlexibleByCandidates([DASH_SHEETS.BASE, DASH_SHEETS.BASE_FALLBACK]);
-  base.rows.forEach((row) => {
-    const key = entityKey(base.headerIndex, row);
+  const registro = readTableFlexibleByCandidates([DASH_SHEETS.REGISTRO, DASH_SHEETS.REGISTRO_FALLBACK]);
+  const registroRows = registro.rows.length === 0 && INCLUDE_BASE_AS_REGISTRO_WHEN_MISSING ? base.rows : registro.rows;
+
+  base.rows.forEach((row, i) => {
+    if (!rowHasData(row, base.headerIndex)) return;
+    const key = entityKey(base.headerIndex, row, i, false);
     if (!key) return;
     const razon = normalizeName(getVal(row, base.headerIndex, FIELD_ALIASES.RAZON));
     const fa = toDate(getVal(row, base.headerIndex, FIELD_ALIASES.FECHA_AF));
@@ -467,16 +585,16 @@ function buildAfiliaciones(profile) {
     afiliaciones.push([anio, padRuc13(getVal(row, base.headerIndex, FIELD_ALIASES.RUC)), razon || prof.RAZON_SOCIAL || "", DASH_SHEETS.BASE]);
   });
 
-  const reg = readTableFlexibleByCandidates([DASH_SHEETS.REGISTRO, DASH_SHEETS.REGISTRO_FALLBACK]);
-  reg.rows.forEach((row) => {
-    const key = entityKey(reg.headerIndex, row);
+  registroRows.forEach((row, i) => {
+    if (!rowHasData(row, registro.headerIndex)) return;
+    const key = entityKey(registro.headerIndex, row, i);
     if (!key) return;
-    const razon = normalizeName(getVal(row, reg.headerIndex, FIELD_ALIASES.RAZON));
-    const fa = toDate(getVal(row, reg.headerIndex, FIELD_ALIASES.FECHA_AF));
+    const razon = normalizeName(getVal(row, registro.headerIndex, FIELD_ALIASES.RAZON));
+    const fa = toDate(getVal(row, registro.headerIndex, FIELD_ALIASES.FECHA_AF));
     const anio = getYear(fa);
     if (!anio) return;
     const prof = profile.get(key) || {};
-    afiliaciones.push([anio, padRuc13(getVal(row, reg.headerIndex, FIELD_ALIASES.RUC)), razon || prof.RAZON_SOCIAL || "", DASH_SHEETS.REGISTRO]);
+    afiliaciones.push([anio, padRuc13(getVal(row, registro.headerIndex, FIELD_ALIASES.RUC)), razon || prof.RAZON_SOCIAL || "", DASH_SHEETS.REGISTRO]);
   });
 
   const sh = getSheetOrCreate(DASH_SHEETS.OUT_AFILIACIONES);
@@ -489,13 +607,28 @@ function buildAfiliaciones(profile) {
 
 function buildEmpresasTamano(profile) {
   const byTam = {};
-  profile.forEach((data) => {
-    const t = (data.TAMANO || "").toString().trim() || "SIN_TAMANO";
-    byTam[t] = (byTam[t] || 0) + 1;
-  });
-  const rows = Object.entries(byTam)
-    .filter(([tam]) => tam !== "SIN_TAMANO") // Ocultar SIN_TAMANO para el gráfico
-    .map(([tam, count]) => [tam, count]);
+
+  if (COUNT_EMPRESAS_POR_FILA) {
+    // Contar cada fila de la base (sin deduplicar por RUC) para cuadrar con las tablas dinámicas originales.
+    const base = readTableFlexibleByCandidates([DASH_SHEETS.BASE, DASH_SHEETS.BASE_FALLBACK]);
+    base.rows.forEach((row) => {
+      if (!rowHasData(row, base.headerIndex)) return;
+      const t =
+        normalizeTamano(getVal(row, base.headerIndex, FIELD_ALIASES.TAMANO)) ||
+        getTamanoFromCodes(base.headerIndex, row) ||
+        DEFAULT_TAMANO_IF_EMPTY;
+      if (!t) return; // omitir filas sin tamaño declarado
+      byTam[t] = (byTam[t] || 0) + 1;
+    });
+  } else {
+    profile.forEach((data) => {
+      const t = (data.TAMANO || "").toString().trim();
+      if (!t) return;
+      byTam[t] = (byTam[t] || 0) + 1;
+    });
+  }
+
+  const rows = Object.entries(byTam).map(([tam, count]) => [tam, count]);
   rows.sort((a, b) => a[0].localeCompare(b[0]));
   const sh = getSheetOrCreate(DASH_SHEETS.OUT_EMPRESAS);
   sh.clear();
@@ -610,6 +743,221 @@ function buildAggregates() {
   shAf.getRange(1, 1, rowsAf.length + 1, 2).setValues([["ANIO_AFILIACION", "AFILIACIONES"], ...rowsAf]);
   shAf.getRange(2, 1, rowsAf.length, 1).setNumberFormat("0"); // Numérico para permitir filtro "Entre" (Range)
   shAf.autoResizeColumns(1, 2);
+}
+
+// ------------------ Debug helpers ------------------ //
+function debugCounts() {
+  const base = readTableFlexibleByCandidates([DASH_SHEETS.BASE, DASH_SHEETS.BASE_FALLBACK]);
+  const yearCols = getYearColumns(base.headerIndex);
+
+  let nonEmpty = 0;
+  let withKey = 0;
+  const noKeyRows = [];
+
+  base.rows.forEach((row, i) => {
+    if (!rowHasData(row, base.headerIndex)) return;
+    nonEmpty += 1;
+    const key = entityKey(base.headerIndex, row, i, false);
+    if (key) {
+      withKey += 1;
+      return;
+    }
+    // Sin RUC/razón: guardar detalle para inspección
+    const tam =
+      normalizeTamano(getVal(row, base.headerIndex, FIELD_ALIASES.TAMANO)) ||
+      getTamanoFromCodes(base.headerIndex, row);
+    const sec = normalizeSector(getVal(row, base.headerIndex, FIELD_ALIASES.SECTOR));
+    const ventas = yearCols
+      .map(({ colKey }) => {
+        const idx = base.headerIndex[colKey];
+        return idx !== undefined ? row[idx] : "";
+      })
+      .filter((v) => (v || "").toString().trim() !== "");
+    noKeyRows.push([
+      i + 2, // número de fila real en la hoja (headers en 1)
+      padRuc13(getVal(row, base.headerIndex, FIELD_ALIASES.RUC)),
+      normalizeName(getVal(row, base.headerIndex, FIELD_ALIASES.RAZON)),
+      tam,
+      sec,
+      ventas.length ? ventas.join(" | ") : "",
+    ]);
+  });
+
+  const sh = getSheetOrCreate("DEBUG_COUNTS");
+  sh.clear();
+  const rowsOut = [
+    ["Metrica", "Valor"],
+    ["BASE filas no vacías", nonEmpty],
+    ["BASE filas con RUC/RAZON", withKey],
+    ["BASE filas sin RUC/RAZON (listadas abajo)", noKeyRows.length],
+  ];
+  const detailHeader = ["Fila hoja", "RUC", "RAZON_SOCIAL", "TAMANO/T_CODE", "SECTOR", "VENTAS_ANYO"];
+  const detail = noKeyRows.length ? [detailHeader, ...noKeyRows] : [detailHeader];
+  sh.getRange(1, 1, rowsOut.length, rowsOut[0].length).setValues(rowsOut);
+  sh.getRange(rowsOut.length + 2, 1, detail.length, detail[0].length).setValues(detail);
+  sh.autoResizeColumns(1, detailHeader.length);
+  SpreadsheetApp.flush();
+  Logger.log("Debug listo en hoja DEBUG_COUNTS");
+}
+
+// Lista duplicados por clave (RUC o RAZON) en la hoja BASE
+function debugDuplicates() {
+  const base = readTableFlexibleByCandidates([DASH_SHEETS.BASE, DASH_SHEETS.BASE_FALLBACK]);
+  const duplicates = [];
+  const seen = new Map();
+
+  base.rows.forEach((row, i) => {
+    if (!rowHasData(row, base.headerIndex)) return;
+    const key = entityKey(base.headerIndex, row, i, false);
+    if (!key) return;
+    const idxList = seen.get(key) || [];
+    idxList.push(i + 2); // fila real
+    seen.set(key, idxList);
+  });
+
+  seen.forEach((rowsIdx, key) => {
+    if (rowsIdx.length <= 1) return;
+    const firstIdx = rowsIdx[0] - 2; // índice en base.rows
+    const row = base.rows[firstIdx] || [];
+    duplicates.push([
+      key,
+      rowsIdx.join(","),
+      normalizeName(getVal(row, base.headerIndex, FIELD_ALIASES.RAZON)),
+      padRuc13(getVal(row, base.headerIndex, FIELD_ALIASES.RUC)),
+      normalizeTamano(getVal(row, base.headerIndex, FIELD_ALIASES.TAMANO)) || getTamanoFromCodes(base.headerIndex, row),
+      getVal(row, base.headerIndex, FIELD_ALIASES.SECTOR),
+    ]);
+  });
+
+  const sh = getSheetOrCreate("DEBUG_DUPLICATES");
+  sh.clear();
+  const header = [["KEY", "FILAS", "RAZON_SOCIAL", "RUC", "TAMANO", "SECTOR"]];
+  const out = duplicates.length ? header.concat(duplicates) : header;
+  sh.getRange(1, 1, out.length, out[0].length).setValues(out);
+  sh.autoResizeColumns(1, out[0].length);
+  SpreadsheetApp.flush();
+  Logger.log("Debug listo en hoja DEBUG_DUPLICATES");
+}
+
+function debugDuplicates() {
+  const base = readTableFlexibleByCandidates([DASH_SHEETS.BASE, DASH_SHEETS.BASE_FALLBACK]);
+  const yearCols = getYearColumns(base.headerIndex);
+  const keyMap = new Map();
+
+  base.rows.forEach((row, i) => {
+    if (!rowHasData(row, base.headerIndex)) return;
+    const key = entityKey(base.headerIndex, row, i, false);
+    if (!key) return;
+    const tam =
+      normalizeTamano(getVal(row, base.headerIndex, FIELD_ALIASES.TAMANO)) ||
+      getTamanoFromCodes(base.headerIndex, row);
+    const sec = normalizeSector(getVal(row, base.headerIndex, FIELD_ALIASES.SECTOR));
+    const ventas = yearCols
+      .map(({ colKey }) => {
+        const idx = base.headerIndex[colKey];
+        return idx !== undefined ? row[idx] : "";
+      })
+      .filter((v) => (v || "").toString().trim() !== "")
+      .join(" | ");
+
+    const info = [
+      i + 2,
+      padRuc13(getVal(row, base.headerIndex, FIELD_ALIASES.RUC)),
+      normalizeName(getVal(row, base.headerIndex, FIELD_ALIASES.RAZON)),
+      tam,
+      sec,
+      ventas,
+    ];
+    if (!keyMap.has(key)) keyMap.set(key, []);
+    keyMap.get(key).push(info);
+  });
+
+  const dupRows = [];
+  keyMap.forEach((list, key) => {
+    if (list.length > 1) list.forEach((info) => dupRows.push([key, ...info]));
+  });
+
+  const sh = getSheetOrCreate("DEBUG_DUP_KEYS");
+  sh.clear();
+  const summary = [
+    ["Metrica", "Valor"],
+    ["Claves duplicadas", dupRows.length],
+  ];
+  const detailHeader = ["KEY", "Fila hoja", "RUC", "RAZON_SOCIAL", "TAMANO", "SECTOR", "VENTAS_ANYO"];
+  const detail = dupRows.length > 0 ? [detailHeader, ...dupRows] : [detailHeader, ["SIN DUPLICADOS", "", "", "", "", "", ""]];
+  sh.getRange(1, 1, summary.length, summary[0].length).setValues(summary);
+  sh.getRange(summary.length + 2, 1, detail.length, detail[0].length).setValues(detail);
+  sh.autoResizeColumns(1, detailHeader.length);
+  SpreadsheetApp.flush();
+  Logger.log("Debug de duplicados listo en hoja DEBUG_DUP_KEYS");
+}
+
+function debugDuplicates() {
+  const base = readTableFlexibleByCandidates([DASH_SHEETS.BASE, DASH_SHEETS.BASE_FALLBACK]);
+  const seen = new Map();
+  const duplicates = [];
+
+  base.rows.forEach((row, i) => {
+    if (!rowHasData(row, base.headerIndex)) return;
+    const key = entityKey(base.headerIndex, row, i, false);
+    if (!key) return;
+    const rowNum = i + 2; // encabezados en fila 1
+    if (seen.has(key)) {
+      duplicates.push([rowNum, key, normalizeName(getVal(row, base.headerIndex, FIELD_ALIASES.RAZON))]);
+    } else {
+      seen.set(key, rowNum);
+    }
+  });
+
+  const sh = getSheetOrCreate("DEBUG_DUP_KEYS");
+  sh.clear();
+  const header = [["Fila hoja", "KEY (RUC/RAZON)", "RAZON_SOCIAL"]];
+  sh.getRange(1, 1, header.length, header[0].length).setValues(header);
+  if (duplicates.length) {
+    sh.getRange(2, 1, duplicates.length, duplicates[0].length).setValues(duplicates);
+  }
+  sh.autoResizeColumns(1, 3);
+  SpreadsheetApp.flush();
+  Logger.log("Debug duplicados listo en hoja DEBUG_DUP_KEYS");
+}
+
+// Listar claves duplicadas (mismo RUC/Razon) en la base
+function debugDuplicates() {
+  const base = readTableFlexibleByCandidates([DASH_SHEETS.BASE, DASH_SHEETS.BASE_FALLBACK]);
+  const dupMap = new Map();
+
+  base.rows.forEach((row, i) => {
+    if (!rowHasData(row, base.headerIndex)) return;
+    const key = entityKey(base.headerIndex, row, i, false);
+    if (!key) return;
+    const razon = normalizeName(getVal(row, base.headerIndex, FIELD_ALIASES.RAZON));
+    const ruc = padRuc13(getVal(row, base.headerIndex, FIELD_ALIASES.RUC));
+    const entry = dupMap.get(key) || { count: 0, rows: [], razon, ruc };
+    entry.count += 1;
+    entry.rows.push(i + 2); // fila real en la hoja
+    // refrescar razon/ruc si estaban vacíos
+    if (!entry.razon && razon) entry.razon = razon;
+    if (!entry.ruc && ruc) entry.ruc = ruc;
+    dupMap.set(key, entry);
+  });
+
+  const duplicates = Array.from(dupMap.entries())
+    .filter(([, v]) => v.count > 1)
+    .map(([key, v]) => [key, v.count, v.ruc || "", v.razon || "", v.rows.join(", ")])
+    .sort((a, b) => b[1] - a[1]);
+
+  const sh = getSheetOrCreate("DEBUG_DUP_KEYS");
+  sh.clear();
+  const header = [["KEY(RUC/RAZON)", "COUNT", "RUC", "RAZON_SOCIAL", "FILAS_BASE"]];
+  const summary = [["Total claves", dupMap.size], ["Duplicadas", duplicates.length]];
+  sh.getRange(1, 1, summary.length, summary[0].length).setValues(summary);
+  sh.getRange(summary.length + 2, 1, header.length, header[0].length).setValues(header);
+  if (duplicates.length) {
+    sh.getRange(summary.length + 3, 1, duplicates.length, header[0].length).setValues(duplicates);
+  }
+  sh.autoResizeColumns(1, header[0].length);
+  SpreadsheetApp.flush();
+  Logger.log("Debug de duplicados listo en hoja DEBUG_DUP_KEYS");
 }
 
 
