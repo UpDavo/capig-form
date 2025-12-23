@@ -6,6 +6,7 @@ from django.conf import settings
 from django.utils.timezone import now
 from datetime import datetime
 import pytz
+import json
 import re
 
 from capig_form.services.google_sheets_service import (
@@ -15,7 +16,13 @@ from capig_form.services.google_sheets_service import (
     insert_row_to_sheet,
 )
 from forms.afiliacion_handler import guardar_nuevo_afiliado_en_google_sheets
-from forms.utils import buscar_afiliado_por_ruc, actualizar_estado_afiliado, buscar_afiliado_por_ruc_base_datos, guardar_ventas_afiliado
+from forms.utils import (
+    buscar_afiliado_por_ruc,
+    actualizar_estado_afiliado,
+    buscar_afiliado_por_ruc_base_datos,
+    guardar_ventas_afiliado,
+    obtener_ventas_por_ruc,
+)
 
 VENTA_KEY_PATTERN = re.compile(r"ventas\[(\d+)\]\[(\w+)\]")
 
@@ -38,10 +45,9 @@ def _parsear_bloques_ventas(post_data):
             campo_normalizado] = (value or "").strip()
     return [bloques[i] for i in sorted(bloques)]
 
-
-def home_view(request):
-    """Vista de inicio con opciones"""
-    return render(request, 'home.html')
+def dashboard_view(request):
+    """Vista del dashboard principal (con layout)"""
+    return render(request, 'dashboard.html')
 
 
 def _obtener_sectores():
@@ -96,7 +102,7 @@ def diag_form_view(request):
     """Vista para el formulario de diagnóstico"""
     if request.method == "POST":
         # Nombre de hoja actualizado
-        SHEET_NAME = 'DIAGNOSTICOS'
+        SHEET_NAME = 'ASESORIAS'
 
         razon_social = request.POST.get('razon_social')
         tipo_diagnostico = request.POST.get('tipo_diagnostico')
@@ -109,12 +115,12 @@ def diag_form_view(request):
         fecha_str = now_ecuador.strftime('%Y-%m-%d')
         hora_str = now_ecuador.strftime('%H:%M:%S')
 
-        print("\n=== FORMULARIO DE DIAGNÓSTICO ===")
+        print("\n=== FORMULARIO DE ASESORÍAS ===")
         print(f"Razón Social: {razon_social}")
-        print(f"Tipo de Diagnóstico: {tipo_diagnostico}")
-        print(f"Subtipo de Diagnóstico: {subtipo_diagnostico}")
+        print(f"Tipo de Asesoría: {tipo_diagnostico}")
+        print(f"Subtipo de Asesoría: {subtipo_diagnostico}")
         print(f"Otros Subtipo: {otros_subtipo}")
-        print(f"Se Diagnosticó: {se_diagnostico}")
+        print(f"Se realizó la asesoría: {se_diagnostico}")
         print(f"Fecha: {fecha_str}")
         print(f"Hora: {hora_str}")
         print("================================\n")
@@ -157,7 +163,6 @@ def cap_form_view(request):
         SHEET_NAME = 'CAPACITACIONES'
 
         razon_social = request.POST.get('razon_social')
-        no_en_lista = request.POST.get('no_en_lista') == 'on'
         nombre_capacitacion = request.POST.get('nombre_capacitacion')
         tipo_capacitacion = request.POST.get('tipo_capacitacion')
         valor_pago = request.POST.get('valor_pago')
@@ -169,7 +174,6 @@ def cap_form_view(request):
 
         print("\n=== FORMULARIO DE CAPACITACIÓN ===")
         print(f"Razón Social: {razon_social}")
-        print(f"No en lista: {'Sí' if no_en_lista else 'No'}")
         print(f"Nombre de la Capacitación: {nombre_capacitacion}")
         print(f"Tipo de Capacitación: {tipo_capacitacion}")
         print(f"Valor del Pago: ${valor_pago}")
@@ -221,12 +225,6 @@ def success_afiliado_view(request):
 def custom_404_view(request, exception):
     """Vista personalizada para error 404"""
     return render(request, '404.html', status=404)
-
-
-@require_GET
-def registro_inicio_view(request):
-    """Landing para acceso al registro de afiliados."""
-    return render(request, "registro_inicio.html")
 
 
 @require_GET
@@ -333,6 +331,9 @@ def ventas_afiliado_view(request):
         "ruc": request.POST.get("ruc", "").strip(),
         "registro_ventas": request.POST.get("registro_ventas", "").strip(),
         "observaciones": request.POST.get("observaciones", "").strip(),
+        "ventas_previas": [],
+        "ventas_previas_years": [],
+        "ventas_previas_json": "[]",
     }
 
     if request.method == "POST":
@@ -344,11 +345,20 @@ def ventas_afiliado_view(request):
         afiliado = buscar_afiliado_por_ruc_base_datos(ruc)
 
         if afiliado:
+            ventas_previas = obtener_ventas_por_ruc(ruc)
+            years_previas = sorted(
+                {v["anio"] for v in ventas_previas if v.get("anio")},
+                reverse=True,
+            )
             context["afiliado"] = afiliado
             context["ruc"] = ruc
             context["registro_ventas"] = registro_ventas
             context["ventas_data"] = ventas_bloques or [_entrada_venta_vacia()]
             context["observaciones"] = observaciones
+            context["ventas_previas"] = ventas_previas
+            context["ventas_previas_years"] = years_previas
+            context["ventas_previas_json"] = json.dumps(
+                ventas_previas, ensure_ascii=False)
 
             # Fase 1: solo se busco por RUC, aun no se responde el formulario
             if not registro_ventas:
@@ -356,7 +366,7 @@ def ventas_afiliado_view(request):
 
             # Fase 2: ya respondio preguntas -> guardar
             if not _codigo_seguridad_valido(request):
-                messages.error(request, "Código de seguridad inválido.")
+                messages.error(request, "Codigo de seguridad invalido.")
                 return render(request, "ventas_afiliado.html", context)
 
             rv_norm = (registro_ventas or "").strip().lower()
@@ -383,7 +393,7 @@ def ventas_afiliado_view(request):
                     anio = (bloque.get("anio") or "").strip()
                     if not anio:
                         messages.error(
-                            request, "Selecciona el año para cada registro de ventas.")
+                            request, "Selecciona el anio para cada registro de ventas.")
                         return render(request, "ventas_afiliado.html", context)
 
                     data = {
@@ -410,5 +420,5 @@ def ventas_afiliado_view(request):
 
 @require_GET
 def success_ventas_afiliado_view(request):
-    """Confirmación de registro de ventas."""
+    """Confirmacion de registro de ventas."""
     return render(request, "success_ventas_afiliado.html")

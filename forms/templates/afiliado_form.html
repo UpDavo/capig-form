@@ -3,13 +3,13 @@
 {% load static %}
 
 {% block content %}
-<div class="form-header">
-    <h2>Registro de Afiliado</h2>
-    <p>Complete la información para registrar una nueva empresa</p>
-    <a href="{% url 'forms:home' %}" class="btn-back">← Menú Principal</a>
-</div>
-
-<div class="form-content">
+<div class="content-body">
+    <div class="content-actions">
+        <a href="{% url 'forms:dashboard' %}" class="btn-back">← Volver al Dashboard</a>
+    </div>
+    
+    <h2 class="content-title">Registro de Afiliado</h2>
+    <p class="content-subtitle">Complete la información para registrar una nueva empresa</p>
     <form method="post" action="{% url 'forms:nuevo_afiliado' %}" data-require-security="true">
         {% csrf_token %}
         <input type="hidden" name="security_code" value="">
@@ -100,9 +100,20 @@
             </select>
         </div>
 
-        <div class="text-center">
+        <div class="form-actions">
             <button type="submit" class="btn btn-primary" data-require-security="true">Registrar Afiliado</button>
         </div>
     </form>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    $(document).ready(function() {
+        // Mostrar loader al enviar formulario
+        $('form').on('submit', function() {
+            $('#globalLoader').addClass('active');
+        });
+    });
+</script>
 {% endblock %}

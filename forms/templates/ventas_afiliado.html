@@ -1,34 +1,60 @@
 {% extends "layout.html" %}
 
 {% block content %}
-<div class="form-header">
-    <h2>Registrar Ventas del Afiliado</h2>
-    <p>Busca por RUC y registra el comparativo de ventas del año.</p>
-    <a href="{% url 'forms:home' %}" class="btn-back">← Menú Principal</a>
-</div>
-
-<div class="form-content">
-    <form method="POST" class="text-center">
+<div class="content-body">
+    <div class="content-actions">
+        <a href="{% url 'forms:dashboard' %}" class="btn-back">← Volver al Dashboard</a>
+    </div>
+    
+    <h2 class="content-title">Registrar Ventas del Afiliado</h2>
+    <p class="content-subtitle">Busca por RUC y registra el comparativo de ventas del año.</p>
+    <form method="POST">
         {% csrf_token %}
         <input type="hidden" name="security_code" value="">
-        
+        <input type="text" name="ruc" placeholder="Ingrese RUC" class="form-control mb-3" value="{{ ruc }}" required>
+
         {% if no_encontrado %}
-            <input type="text" name="ruc" placeholder="Ingrese RUC" class="form-control mb-4" value="{{ ruc }}" required>
             <div class="alert alert-danger">No se encontró el afiliado.</div>
-            <button type="submit" class="btn btn-primary">Buscar</button>
-        {% elif afiliado %}
-            <input type="hidden" name="ruc" value="{{ ruc }}">
-            <div class="card p-4 text-start">
+        {% endif %}
+
+        {% if afiliado %}
+            <div class="card p-3 text-start mb-3">
                 <p><strong>Razón Social:</strong> {{ afiliado.razon_social }}</p>
                 <p><strong>Ciudad:</strong> {{ afiliado.ciudad }}</p>
                 <p><strong>Fecha de Afiliación:</strong> {{ afiliado.fecha_afiliacion }}</p>
+
+                {% if ventas_previas_years %}
+                <div class="alert alert-info mt-3">
+                    <div class="d-flex flex-column gap-2">
+                        <div class="d-flex align-items-center justify-content-between flex-wrap">
+                            <div>
+                                <strong>Ventas registradas previamente</strong>
+                                <div class="text-muted small">Consulta el historial por año antes de registrar nuevas ventas.</div>
+                            </div>
+                            <div class="ms-auto" style="min-width: 200px;">
+                                <label for="ventas_previas_select" class="form-label mb-1">Año</label>
+                                <select id="ventas_previas_select" class="form-select form-select-sm">
+                                    <option value="">Seleccione</option>
+                                    {% for anio in ventas_previas_years %}
+                                    <option value="{{ anio }}">{{ anio }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                        <div id="ventas_previas_resumen" class="bg-white border rounded p-2">
+                            <div class="text-muted">Seleccione un año para ver el resumen.</div>
+                        </div>
+                    </div>
+                </div>
+                <script id="ventas-previas-data" type="application/json">{{ ventas_previas_json|safe }}</script>
+                {% endif %}
 
                 {% with selected_registro=registro_ventas %}
                 <label for="registro_ventas" class="form-label mt-2">¿Registró ventas este año?</label>
                 <select name="registro_ventas" id="registro_ventas" class="form-select" required onchange="toggleCamposVentas(this.value)">
                     <option value="">Seleccione</option>
                     {% with registro_lower=selected_registro|default:''|lower %}
-                    <option value="Sí" {% if registro_lower == "sí" or registro_lower == "si" or registro_lower == "s" %}selected{% endif %}>Sí</option>
+                    <option value="Sí" {% if registro_lower == "sí" or registro_lower == "si" or registro_lower == "s" or registro_lower == "s�" %}selected{% endif %}>Sí</option>
                     <option value="No" {% if registro_lower == "no" %}selected{% endif %}>No</option>
                     {% endwith %}
                 </select>
@@ -40,15 +66,16 @@
                             {% with idx=forloop.counter0 %}
                             <div class="border rounded p-3 mt-3 venta-bloque" data-index="{{ idx }}">
                                 <div class="row g-3 align-items-end">
-                                    <div class="col-md-4">
-                                        <label class="form-label" for="venta_anio_{{ idx }}">Año</label>
-                                        <select class="form-select anio-select" name="ventas[{{ idx }}][anio]" id="venta_anio_{{ idx }}" data-selected="{{ venta.anio }}" required>
-                                            <option value="">Seleccione</option>
-                                        </select>
-                                    </div>
-                                    <div class="col-md-4">
-                                        <label class="form-label" for="venta_comparativo_{{ idx }}">¿Cómo compara sus ventas con el año anterior?</label>
-                                        <select name="ventas[{{ idx }}][comparativo]" id="venta_comparativo_{{ idx }}" class="form-select">
+                            <div class="col-md-4">
+                                <label class="form-label" for="venta_anio_{{ idx }}">Año</label>
+                                <select class="form-select anio-select" name="ventas[{{ idx }}][anio]" id="venta_anio_{{ idx }}" data-selected="{{ venta.anio }}" required>
+                                    <option value="">Seleccione</option>
+                                </select>
+                                <div class="small text-muted mt-1 venta-previa-info" data-target="{{ idx }}" style="display:none;"></div>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label" for="venta_comparativo_{{ idx }}">¿Cómo compara sus ventas con el año anterior?</label>
+                                <select name="ventas[{{ idx }}][comparativo]" id="venta_comparativo_{{ idx }}" class="form-select">
                                             <option value="">Seleccione</option>
                                             <option value="Aumentó" {% if venta.comparativo == "Aumentó" %}selected{% endif %}>Aumentó</option>
                                             <option value="Igual" {% if venta.comparativo == "Igual" %}selected{% endif %}>Igual</option>
@@ -75,10 +102,7 @@
                 <label for="observaciones" class="form-label mt-3">Observaciones adicionales (opcional)</label>
                 <textarea name="observaciones" id="observaciones" class="form-control" rows="3">{{ observaciones }}</textarea>
 
-                <div class="d-flex gap-2 mt-3">
-                    <button type="submit" class="btn btn-success" data-require-security="true">Guardar</button>
-                    <a href="{% url 'forms:ventas_afiliado' %}" class="btn btn-outline-secondary">Volver</a>
-                </div>
+                <button type="submit" class="btn btn-success mt-4" data-require-security="true">Guardar</button>
             </div>
 
             <template id="venta-template">
@@ -89,6 +113,7 @@
                             <select class="form-select anio-select" data-field-name="anio" data-selected="" required>
                                 <option value="">Seleccione</option>
                             </select>
+                            <div class="small text-muted mt-1 venta-previa-info" style="display:none;"></div>
                         </div>
                         <div class="col-md-4">
                             <label class="form-label" data-for-field="comparativo">¿Cómo compara sus ventas con el año anterior?</label>
@@ -108,7 +133,6 @@
                 </div>
             </template>
         {% else %}
-            <input type="text" name="ruc" placeholder="Ingrese RUC" class="form-control mb-4" value="{{ ruc }}" required>
             <button type="submit" class="btn btn-primary">Buscar</button>
         {% endif %}
     </form>
@@ -125,14 +149,84 @@
     const agregarBtn = document.getElementById("agregar-venta");
     const spinner = agregarBtn ? agregarBtn.querySelector(".spinner-border") : null;
     const YEAR_MIN = 2000;
+    const prevDataEl = document.getElementById("ventas-previas-data");
+    const prevSelect = document.getElementById("ventas_previas_select");
+    const prevResumen = document.getElementById("ventas_previas_resumen");
+    let ventasPrevias = [];
+
+    if (prevDataEl) {
+      try {
+        ventasPrevias = JSON.parse(prevDataEl.textContent || "[]") || [];
+      } catch (e) {
+        ventasPrevias = [];
+      }
+    }
 
     function normalizar(valor) {
       return (valor || "").toString().trim().toLowerCase();
     }
 
+    function renderVentaPrevia(anio) {
+      if (!prevResumen) return;
+      if (!anio) {
+        prevResumen.innerHTML = '<div class="text-muted">Seleccione un año para ver el resumen.</div>';
+        return;
+      }
+      const match = ventasPrevias.find((v) => (v.anio || "").toString() === (anio || "").toString());
+      if (!match) {
+        prevResumen.innerHTML = '<div class="text-muted">No hay registros para el año seleccionado.</div>';
+        return;
+      }
+      const comparativo = match.comparativo || "Sin dato";
+      const monto = match.ventas_estimadas || "Sin dato";
+      const fecha = match.fecha_registro || "Sin fecha";
+        prevResumen.innerHTML = `
+        <div class="d-flex flex-wrap gap-3">
+          <div><strong>Total:</strong> ${monto}</div>
+        </div>
+      `;
+    }
+
+    function setVentaInfoForBlock(selectEl) {
+      if (!selectEl) return;
+      const bloque = selectEl.closest(".venta-bloque");
+      const infoEl = bloque ? bloque.querySelector(".venta-previa-info") : null;
+      const comparativoEl = bloque ? bloque.querySelector("[name^='ventas'][name$='[comparativo]']") : null;
+      const montoEl = bloque ? bloque.querySelector("[name^='ventas'][name$='[ventas_estimadas]']") : null;
+      const anio = selectEl.value;
+
+      if (!infoEl) return;
+      if (!anio) {
+        infoEl.style.display = "none";
+        infoEl.textContent = "";
+        return;
+      }
+      const match = ventasPrevias.find((v) => (v.anio || "").toString() === (anio || "").toString());
+      if (!match) {
+        infoEl.style.display = "none";
+        infoEl.textContent = "";
+        return;
+      }
+      infoEl.style.display = "block";
+      const comparativo = match.comparativo || "Sin dato";
+      const monto = match.ventas_estimadas || "Sin dato";
+      infoEl.textContent = `Total histórico: ${monto}`;
+
+      // Autorrellenar si el campo está vacío para no sobreescribir la entrada actual
+      if (comparativoEl && !comparativoEl.value) {
+        const opt = Array.from(comparativoEl.options).find(
+          (o) => o.value.toString().toLowerCase() === comparativo.toString().toLowerCase()
+        );
+        if (opt) comparativoEl.value = opt.value;
+      }
+      if (montoEl && !montoEl.value && monto && !isNaN(Number(monto))) {
+        montoEl.value = monto;
+      }
+    }
+
     window.toggleCamposVentas = function(valor) {
       if (!campos) return;
-      const mostrar = ["si", "sí", "s"].includes(normalizar(valor));
+      const mostrar = ["si", "sí", "s", "s�"].includes(normalizar(valor));
       campos.style.display = mostrar ? "block" : "none";
     };
 
@@ -151,6 +245,7 @@
       if (seleccionado) {
         select.value = seleccionado;
       }
+      setVentaInfoForBlock(select);
     }
 
     function hydrateYearSelects() {
@@ -215,9 +310,23 @@
 
     hydrateYearSelects();
     updateContainerCount();
+    document.querySelectorAll(".anio-select").forEach((sel) => {
+      sel.addEventListener("change", () => setVentaInfoForBlock(sel));
+      setVentaInfoForBlock(sel);
+    });
+    if (prevSelect) {
+      prevSelect.addEventListener("change", (e) => {
+        renderVentaPrevia(e.target.value);
+      });
+    }
     if (registroSelect) {
       toggleCamposVentas(registroSelect.value);
     }
+    
+    // Mostrar loader al enviar formulario
+    $('form').on('submit', function() {
+        $('#globalLoader').addClass('active');
+    });
   })();
 </script>
 {% endblock %}

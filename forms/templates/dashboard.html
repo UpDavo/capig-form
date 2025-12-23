@@ -1,0 +1,134 @@
+{% extends "layout.html" %}
+
+{% block title %}Dashboard - CAPIG{% endblock %}
+
+{% block extra_css %}
+<style>
+    .welcome-section {
+        text-align: center;
+        padding: 60px 20px;
+    }
+
+    .welcome-section h1 {
+        color: #264591;
+        font-size: 42px;
+        font-weight: 700;
+        margin-bottom: 16px;
+    }
+
+    .welcome-section p {
+        color: #666;
+        font-size: 18px;
+        margin-bottom: 40px;
+    }
+
+    .dashboard-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 20px;
+        max-width: 900px;
+        margin: 0 auto;
+    }
+
+    @media (min-width: 768px) {
+        .dashboard-grid {
+            grid-template-columns: repeat(2, 1fr);
+        }
+    }
+
+    .dashboard-card {
+        background: white;
+        border: 2px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 24px;
+        transition: all 0.3s ease;
+        text-decoration: none;
+        display: block;
+    }
+
+    .dashboard-card:hover {
+        border-color: var(--color-primary);
+        transform: translateY(-4px);
+        box-shadow: 0 8px 20px rgba(38, 69, 145, 0.15);
+    }
+
+    .card-icon {
+        font-size: 36px;
+        margin-bottom: 16px;
+    }
+
+    .card-title {
+        color: #264591;
+        font-size: 20px;
+        font-weight: 600;
+        margin-bottom: 8px;
+    }
+
+    .card-description {
+        color: #666;
+        font-size: 14px;
+        line-height: 1.5;
+    }
+
+    .card-primary {
+        background: linear-gradient(135deg, #264591, #3d5a9e);
+        border: none;
+    }
+
+    .card-primary:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 8px 20px rgba(38, 69, 145, 0.35);
+    }
+
+    .card-primary .card-title,
+    .card-primary .card-description {
+        color: white;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="content-body no-card">
+    <div class="welcome-section">
+        <h1>Bienvenido al Dashboard CAPIG</h1>
+        <p>Seleccione una opción para comenzar</p>
+    </div>
+
+    <div class="dashboard-grid">
+        <!-- Asesoría -->
+        <a href="{% url 'forms:diag_form' %}" class="dashboard-card card-primary">
+            <div class="card-icon">💼</div>
+            <h3 class="card-title">Asesoría</h3>
+            <p class="card-description">Registre servicios de asesoría empresarial</p>
+        </a>
+
+        <!-- Capacitación -->
+        <a href="{% url 'forms:cap_form' %}" class="dashboard-card card-primary">
+            <div class="card-icon">📚</div>
+            <h3 class="card-title">Capacitación</h3>
+            <p class="card-description">Registre programas de capacitación</p>
+        </a>
+
+        <!-- Registro de Afiliados -->
+        <a href="{% url 'forms:nuevo_afiliado' %}" class="dashboard-card">
+            <div class="card-icon">➕</div>
+            <h3 class="card-title">Registro de Afiliados</h3>
+            <p class="card-description">Registre nuevos afiliados en el sistema</p>
+        </a>
+
+        <!-- Estado del Afiliado -->
+        <a href="{% url 'forms:estado_afiliado' %}" class="dashboard-card">
+            <div class="card-icon">🔍</div>
+            <h3 class="card-title">Estado del Afiliado</h3>
+            <p class="card-description">Consulte y actualice el estado de afiliación</p>
+        </a>
+
+        <!-- Ventas Afiliado -->
+        <a href="{% url 'forms:ventas_afiliado' %}" class="dashboard-card">
+            <div class="card-icon">📊</div>
+            <h3 class="card-title">Ventas Afiliado</h3>
+            <p class="card-description">Registre las ventas anuales de afiliados</p>
+        </a>
+    </div>
+</div>
+{% endblock %}

@@ -3,13 +3,13 @@
 {% block title %}Formulario de Capacitación - CAPIG{% endblock %}
 
 {% block content %}
-<div class="form-header">
-    <h2>Capacitación</h2>
-    <p>Complete la información de la capacitación</p>
-    <a href="{% url 'forms:home' %}" class="btn-back">← Menú Principal</a>
-</div>
-
-<div class="form-content">
+<div class="content-body">
+    <div class="content-actions">
+        <a href="{% url 'forms:dashboard' %}" class="btn-back">← Volver al Dashboard</a>
+    </div>
+    
+    <h2 class="content-title">Capacitación</h2>
+    <p class="content-subtitle">Complete la información de la capacitación</p>
     <form method="POST" action="{% url 'forms:cap_form' %}" id="capForm">
         {% csrf_token %}
         
@@ -68,7 +68,7 @@
         </div>
         
         <!-- Botón de Envío -->
-        <div class="text-center">
+        <div class="form-actions">
             <button type="submit" class="btn btn-primary">Enviar Capacitación</button>
         </div>
     </form>
@@ -136,11 +136,14 @@
             }
             
             if (valorPago === 0) {
-                if (!confirm('El valor del pago es $0.00. ¿Desea continuar?')) {
+                if (!confirm('El valor del pago es $0. ¿Desea continuar?')) {
                     e.preventDefault();
                     return false;
                 }
             }
+            
+            // Mostrar loader al enviar
+            $('#globalLoader').addClass('active');
         });
     });
 </script>

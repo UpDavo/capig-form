@@ -3,13 +3,13 @@
 {% block title %}Formulario de Asesorias - CAPIG{% endblock %}
 
 {% block content %}
-<div class="form-header">
-    <h2>Asesoría</h2>
-    <p>Complete la información requerida</p>
-    <a href="{% url 'forms:home' %}" class="btn-back">← Menú Principal</a>
-</div>
-
-<div class="form-content">
+<div class="content-body">
+    <div class="content-actions">
+        <a href="{% url 'forms:dashboard' %}" class="btn-back">← Volver al Dashboard</a>
+    </div>
+    
+    <h2 class="content-title">Asesoría</h2>
+    <p class="content-subtitle">Complete la información requerida</p>
     <form method="POST" action="{% url 'forms:diag_form' %}" id="diagForm">
         {% csrf_token %}
         
@@ -67,7 +67,7 @@
         </div>
         
         <!-- Botón de Envío -->
-        <div class="text-center">
+        <div class="form-actions">
             <button type="submit" class="btn btn-primary">Enviar Asesoría</button>
         </div>
     </form>
@@ -132,6 +132,9 @@
                 alert('Por favor, especifique el subtipo de asesoría.');
                 return false;
             }
+            
+            // Mostrar loader al enviar
+            $('#globalLoader').addClass('active');
         });
     });
 </script>

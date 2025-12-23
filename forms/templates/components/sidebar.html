@@ -1,0 +1,53 @@
+<!-- Sidebar -->
+<aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+        <h1>CAPIG</h1>
+    </div>
+
+    <nav class="sidebar-nav">
+        <!-- Dashboard -->
+        <div class="nav-section">
+            <div class="nav-section-title">Principal</div>
+            <div class="nav-item">
+                <a href="{% url 'forms:dashboard' %}" class="nav-link">
+                    Dashboard
+                </a>
+            </div>
+        </div>
+
+        <!-- Servicios -->
+        <div class="nav-section">
+            <div class="nav-section-title">Servicios</div>
+            <div class="nav-item">
+                <a href="{% url 'forms:diag_form' %}" class="nav-link">
+                    Asesoría
+                </a>
+            </div>
+            <div class="nav-item">
+                <a href="{% url 'forms:cap_form' %}" class="nav-link">
+                    Capacitación
+                </a>
+            </div>
+        </div>
+
+        <!-- Gestión de Afiliados -->
+        <div class="nav-section">
+            <div class="nav-section-title">Gestión de Afiliados</div>
+            <div class="nav-item">
+                <a href="{% url 'forms:nuevo_afiliado' %}" class="nav-link">
+                    Registro de afiliados
+                </a>
+            </div>
+            <div class="nav-item">
+                <a href="{% url 'forms:estado_afiliado' %}" class="nav-link">
+                    Estado del afiliado
+                </a>
+            </div>
+            <div class="nav-item">
+                <a href="{% url 'forms:ventas_afiliado' %}" class="nav-link">
+                    Ventas afiliado
+                </a>
+            </div>
+        </div>
+    </nav>
+</aside>

@@ -1,9 +1,11 @@
+{% load static %}
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Formularios CAPIG{% endblock %}</title>
+    <title>{% block title %}CAPIG - Sistema de Gestión{% endblock %}</title>
     
     <!-- Bootstrap 5 CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
@@ -12,519 +14,664 @@
     <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
     <link href="https://cdn.jsdelivr.net/npm/select2-bootstrap-5-theme@1.3.0/dist/select2-bootstrap-5-theme.min.css" rel="stylesheet" />
     
-    <!-- Custom CSS -->
     <style>
-        /* ===== RESET Y BASE (Mobile First) ===== */
+        /* ===== VARIABLES Y RESET ===== */
+        :root {
+            --color-primary: #264591;
+            --color-primary-dark: #1a3366;
+            --color-primary-light: #3d5a9e;
+            --color-bg-light: #f8f9fb;
+            --color-border: #d1d9e6;
+            --color-text: #333;
+            --color-text-light: #666;
+            --sidebar-width: 280px;
+        }
+
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
-        
-        html, body {
-            height: 100%;
-            width: 100%;
-            overflow: hidden;
-            margin: 0;
-            padding: 0;
-        }
-        
+
         body {
-            background: linear-gradient(135deg, #8aa8ff, #9e6bff);
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            font-size: 14px;
-        }
-        
-        .container {
-            height: 100vh;
-            width: 100%;
-            max-width: 100%;
-            padding: 0;
-            margin: 0;
-            display: flex;
-            flex-direction: column;
-        }
-        
-        .row {
-            height: 100%;
-            width: 100%;
-            margin: 0;
-            flex: 1;
-            display: flex;
-        }
-        
-        .col-lg-8, .col-md-10 {
-            height: 100%;
-            width: 100%;
-            max-width: 100%;
-            padding: 0;
-            display: flex;
-            flex-direction: column;
-        }
-        
-        .form-container {
-            background: white;
-            height: 100vh;
-            width: 100%;
-            display: flex;
-            flex-direction: column;
-            border-radius: 0;
-            box-shadow: none;
-            padding: 0;
-            margin: 0;
-            overflow: hidden;
-        }
-        
-        /* ===== HEADER DEL FORMULARIO ===== */
-        .form-header {
-            text-align: center;
-            padding: 16px 16px 12px;
-            border-bottom: 2px solid #f0f0f0;
-            background: white;
-            flex-shrink: 0;
-            position: sticky;
-            top: 0;
-            z-index: 10;
-        }
-        
-        .form-header h2 {
-            color: #6d5bff;
-            font-weight: 700;
-            margin-bottom: 6px;
-            font-size: 1.4rem;
-        }
-        
-        .form-header p {
-            color: #666;
-            margin: 0;
-            font-size: 0.85rem;
-            line-height: 1.4;
-        }
-
-        .form-header .btn-back {
-            margin-top: 10px;
-            background: white;
-            border: 2px solid #6d5bff;
-            color: #6d5bff;
-            padding: 8px 16px;
-            font-weight: 600;
-            border-radius: 10px;
-            transition: all 0.2s ease;
-            font-size: 0.85rem;
-            text-decoration: none;
-            display: inline-block;
-        }
-
-        .form-header .btn-back:active {
-            background: #f4f0ff;
-            transform: scale(0.98);
-        }
-        
-        /* ===== CONTENIDO DEL FORMULARIO ===== */
-        .form-content {
-            flex: 1;
-            overflow-y: auto;
+            background: var(--color-bg-light);
+            min-height: 100vh;
             overflow-x: hidden;
-            padding: 16px;
-            -webkit-overflow-scrolling: touch;
         }
-        
-        /* ===== CAMPOS DE FORMULARIO ===== */
-        .form-label {
+
+        /* ===== SIDEBAR ===== */
+        .sidebar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            height: 100vh;
+            width: var(--sidebar-width);
+            background: linear-gradient(180deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+            color: white;
+            padding: 0;
+            z-index: 1000;
+            box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease;
+            overflow-y: auto;
+        }
+
+        .sidebar-header {
+            padding: 24px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            text-align: center;
+        }
+
+        .sidebar-header h1 {
+            font-size: 32px;
+            font-weight: 700;
+            color: white;
+            margin: 0;
+            letter-spacing: 1px;
+        }
+
+        .sidebar-header p {
+            font-size: 12px;
+            color: rgba(255, 255, 255, 0.7);
+            margin: 8px 0 0 0;
+        }
+
+        .sidebar-nav {
+            padding: 20px 0;
+        }
+
+        .nav-section {
+            margin-bottom: 24px;
+        }
+
+        .nav-section-title {
+            padding: 8px 20px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: rgba(255, 255, 255, 0.5);
+            margin-bottom: 8px;
+        }
+
+        .nav-item {
+            margin: 4px 12px;
+        }
+
+        .nav-link {
+            display: flex;
+            align-items: center;
+            padding: 12px 16px;
+            color: rgba(255, 255, 255, 0.85);
+            text-decoration: none;
+            border-radius: 8px;
+            transition: all 0.2s ease;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .nav-link:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            transform: translateX(4px);
+        }
+
+        .nav-link.active {
+            background: rgba(255, 255, 255, 0.15);
+            color: white;
             font-weight: 600;
-            color: #333;
-            margin-bottom: 6px;
-            font-size: 0.9rem;
+        }
+
+        .nav-link i {
+            margin-right: 12px;
+            font-size: 16px;
+            width: 20px;
+            text-align: center;
+        }
+
+        /* Icono usando emoji/símbolos */
+        .nav-icon {
+            margin-right: 12px;
+            font-size: 16px;
+            width: 20px;
+            text-align: center;
+        }
+
+        /* ===== MAIN CONTENT ===== */
+        .main-content {
+            margin-left: var(--sidebar-width);
+            min-height: 100vh;
+            padding: 24px;
+            transition: margin-left 0.3s ease;
+        }
+
+        .content-header {
+            background: white;
+            padding: 20px 24px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+            margin-bottom: 24px;
+        }
+
+        .content-header h2 {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--color-text);
+            margin: 0;
+        }
+
+        .content-header p {
+            font-size: 14px;
+            color: var(--color-text-light);
+            margin: 8px 0 0 0;
+        }
+
+        .content-body {
+            background: white;
+            padding: 24px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        /* ===== FOOTER ===== */
+        .footer {
+            margin-left: var(--sidebar-width);
+            padding: 20px 24px;
+            text-align: center;
+            color: var(--color-text-light);
+            font-size: 12px;
+            transition: margin-left 0.3s ease;
+        }
+
+        /* ===== MOBILE MENU TOGGLE ===== */
+        .menu-toggle {
+            position: fixed;
+            top: 16px;
+            left: 16px;
+            z-index: 1001;
+            background: var(--color-primary);
+            color: white;
+            border: none;
+            padding: 10px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            display: none;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .menu-toggle:hover {
+            background: var(--color-primary-dark);
+        }
+
+        /* ===== MOBILE HEADER ===== */
+        .mobile-header {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 60px;
+            background: white;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            z-index: 998;
+            align-items: center;
+            padding: 0 16px;
+        }
+
+        .mobile-header-title {
+            flex: 1;
+            text-align: center;
+            color: var(--color-primary);
+            font-size: 20px;
+            font-weight: 700;
+            margin: 0;
+        }
+
+        .mobile-menu-btn {
+            background: var(--color-primary);
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 20px;
+            line-height: 1;
+        }
+
+        /* ===== RESPONSIVE ===== */
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 280px;
+                transform: translateX(-100%);
+            }
+
+            .sidebar.active {
+                transform: translateX(0);
+            }
+
+            .main-content,
+            .footer {
+                margin-left: 0;
+                padding-top: 76px; /* 60px header + 16px spacing */
+            }
+
+            .menu-toggle {
+                display: none; /* Ocultamos el botón flotante */
+            }
+
+            .mobile-header {
+                display: flex;
+            }
+
+            .content-header h2 {
+                font-size: 20px;
+            }
+
+            .content-body {
+                padding: 16px;
+            }
+        }
+
+        /* ===== OVERLAY PARA MOBILE ===== */
+        .sidebar-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 999;
+            display: none;
+        }
+
+        .sidebar-overlay.active {
             display: block;
         }
-        
-        .form-control, .form-select {
-            border-radius: 10px;
-            border: 2px solid #e9ecef;
-            padding: 12px 14px;
-            font-size: 0.95rem;
-            width: 100%;
-            transition: all 0.2s ease;
-        }
-        
-        .form-control:focus, .form-select:focus {
-            border-color: #6d5bff;
-            box-shadow: 0 0 0 3px rgba(109, 91, 255, 0.1);
-            outline: none;
-        }
-        
-        /* ===== BOTONES ===== */
+
+        /* ===== CUSTOM BOOTSTRAP OVERRIDES ===== */
         .btn-primary {
-            background: linear-gradient(135deg, #6d5bff, #916bff);
-            border: none;
-            padding: 14px 24px;
-            font-weight: 600;
-            border-radius: 10px;
-            transition: all 0.2s ease;
-            width: 100%;
-            font-size: 1rem;
-            color: white;
-            box-shadow: 0 4px 12px rgba(109, 91, 255, 0.3);
+            background: var(--color-primary);
+            border-color: var(--color-primary);
         }
-        
-        .btn-primary:active {
-            transform: scale(0.98);
-            box-shadow: 0 2px 8px rgba(109, 91, 255, 0.4);
+
+        .btn-primary:hover {
+            background: var(--color-primary-dark);
+            border-color: var(--color-primary-dark);
         }
-        
-        /* ===== CHECKBOXES Y RADIOS ===== */
-        .form-check-input {
-            width: 1.2em;
-            height: 1.2em;
-            border: 2px solid #e9ecef;
+
+        .btn-outline-primary {
+            color: var(--color-primary);
+            border-color: var(--color-primary);
         }
-        
-        .form-check-input:checked {
-            background-color: #6d5bff;
-            border-color: #6d5bff;
+
+        .btn-outline-primary:hover {
+            background: var(--color-primary);
+            border-color: var(--color-primary);
         }
-        
-        .form-check-input:focus {
-            box-shadow: 0 0 0 3px rgba(109, 91, 255, 0.1);
+
+        .form-control:focus,
+        .form-select:focus {
+            border-color: var(--color-primary);
+            box-shadow: 0 0 0 0.2rem rgba(38, 69, 145, 0.25);
         }
-        
-        .form-check-label {
-            font-size: 0.95rem;
-            margin-left: 6px;
-            color: #333;
-        }
-        
-        /* ===== ALERTAS ===== */
-        .alert {
-            border-radius: 10px;
-            border: none;
-            font-size: 0.9rem;
-            padding: 12px 16px;
-        }
-        
-        /* ===== SELECT2 ===== */
+
+        /* ===== SELECT2 CUSTOM ===== */
         .select2-container--bootstrap-5 .select2-selection {
-            border: 2px solid #e9ecef;
-            border-radius: 10px;
-            min-height: 46px;
+            border-color: var(--color-border);
         }
-        
+
         .select2-container--bootstrap-5.select2-container--focus .select2-selection {
-            border-color: #6d5bff;
-            box-shadow: 0 0 0 3px rgba(109, 91, 255, 0.1);
+            border-color: var(--color-primary);
+            box-shadow: 0 0 0 0.2rem rgba(38, 69, 145, 0.25);
         }
-        
-        /* ===== UTILIDADES ===== */
-        .mb-4 {
-            margin-bottom: 1.25rem !important;
+
+        /* ===== CONTENT TITLES ===== */
+        .content-title {
+            color: var(--color-primary);
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
         }
-        
-        .input-group-text {
-            font-size: 0.95rem;
-            border: 2px solid #e9ecef;
-            border-radius: 10px 0 0 10px;
-            background: #f8f9fa;
+
+        .content-subtitle {
+            color: var(--color-text-light);
+            font-size: 16px;
+            margin-bottom: 32px;
         }
-        
-        .input-group .form-control {
-            border-left: 0;
-            border-radius: 0 10px 10px 0;
+
+        .content-actions {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 32px;
         }
-        
-        small.text-muted {
-            font-size: 0.8rem;
-            color: #6c757d;
+
+        .btn-back {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--color-text-light);
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+            padding: 8px 16px;
+            border-radius: 8px;
+            transition: all 0.2s;
         }
-        
+
+        .btn-back:hover {
+            background: var(--color-bg-light);
+            color: var(--color-primary);
+        }
+
+        /* ===== FORM STYLES ===== */
+        .form-section {
+            margin-bottom: 32px;
+        }
+
+        .form-section-title {
+            color: var(--color-text);
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 20px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid var(--color-bg-light);
+        }
+
+        .form-label {
+            color: var(--color-text);
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+
+        .form-control,
+        .form-select {
+            border-radius: 8px;
+            border: 1px solid var(--color-border);
+            padding: 12px 16px;
+            transition: all 0.2s;
+        }
+
+        .form-control:focus,
+        .form-select:focus {
+            border-color: var(--color-primary);
+            box-shadow: 0 0 0 0.2rem rgba(38, 69, 145, 0.15);
+        }
+
+        .form-actions {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            margin-top: 32px;
+        }
+
+        .btn {
+            padding: 12px 32px;
+            border-radius: 8px;
+            font-weight: 600;
+            transition: all 0.2s;
+        }
+
         .text-danger {
             color: #dc3545;
         }
-        
-        /* ===== SCROLLBAR ===== */
-        .form-content::-webkit-scrollbar {
-            width: 4px;
+
+        .text-muted {
+            color: var(--color-text-light);
+            font-size: 14px;
         }
-        
-        .form-content::-webkit-scrollbar-track {
-            background: transparent;
+
+        /* ===== ALERT MESSAGES ===== */
+        .alert {
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 24px;
         }
-        
-        .form-content::-webkit-scrollbar-thumb {
-            background: rgba(109, 91, 255, 0.2);
-            border-radius: 10px;
+
+        .alert-danger {
+            background: #fee;
+            border: 1px solid #fcc;
+            color: #c33;
         }
-        
-        /* ===== TABLET (sm) ===== */
-        @media (min-width: 480px) {
-            .form-header {
-                padding: 20px 20px 16px;
-            }
-            
-            .form-header h2 {
-                font-size: 1.6rem;
-            }
-            
-            .form-header p {
-                font-size: 0.9rem;
-            }
-            
-            .form-header .btn-back {
-                padding: 10px 20px;
-                font-size: 0.9rem;
-            }
-            
-            .form-content {
-                padding: 20px;
-            }
-            
-            .mb-4 {
-                margin-bottom: 1.5rem !important;
+
+        .alert-success {
+            background: #efe;
+            border: 1px solid #cfc;
+            color: #3c3;
+        }
+
+        .alert-info {
+            background: #eef;
+            border: 1px solid #ccf;
+            color: #33c;
+        }
+
+        .alert-warning {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+        }
+
+        /* ===== BADGES ===== */
+        .badge {
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .badge.bg-success {
+            background: #28a745 !important;
+            color: white;
+        }
+
+        .badge.bg-danger {
+            background: #dc3545 !important;
+            color: white;
+        }
+
+        /* ===== CARD COMPONENTS ===== */
+        .card {
+            background: white;
+            border: 1px solid var(--color-border);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 16px;
+        }
+
+        .card p {
+            margin-bottom: 8px;
+        }
+
+        .card strong {
+            color: var(--color-text);
+        }
+
+        /* ===== SUCCESS ICON ===== */
+        .success-icon {
+            color: #28a745;
+            animation: scaleIn 0.5s ease-out;
+        }
+
+        @keyframes scaleIn {
+            0% { transform: scale(0); opacity: 0; }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        /* ===== GLOBAL LOADER ===== */
+        .global-loader {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(248, 249, 251, 0.7);
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            z-index: 9999;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+
+        .global-loader.active {
+            display: flex;
+            opacity: 1;
+        }
+
+        .loader-content {
+            text-align: center;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid rgba(38, 69, 145, 0.1);
+            border-top-color: var(--color-primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 0 auto 16px;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
             }
         }
-        
-        /* ===== TABLET GRANDE (md) ===== */
-        @media (min-width: 768px) {
-            body {
-                font-size: 15px;
-            }
-            
-            .container {
-                padding: 16px;
-            }
-            
-            .col-md-10 {
-                max-width: 100%;
-                padding: 0;
-            }
-            
-            .form-container {
-                border-radius: 20px;
-                box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
-                height: calc(100vh - 32px);
-            }
-            
-            .form-header {
-                padding: 24px 28px 20px;
-            }
-            
-            .form-header h2 {
-                font-size: 1.9rem;
-            }
-            
-            .form-header p {
-                font-size: 0.95rem;
-            }
-            
-            .form-header .btn-back:hover {
-                background: #6d5bff;
-                color: white;
-                transform: translateY(-2px);
-                box-shadow: 0 4px 12px rgba(109, 91, 255, 0.3);
-            }
-            
-            .form-content {
-                padding: 28px 32px 24px;
-            }
-            
-            .btn-primary:hover {
-                transform: translateY(-2px);
-                box-shadow: 0 6px 20px rgba(109, 91, 255, 0.4);
-            }
+
+        .loader-text {
+            color: var(--color-primary);
+            font-size: 14px;
+            font-weight: 600;
         }
-        
-        /* ===== DESKTOP (lg) ===== */
-        @media (min-width: 992px) {
-            body {
-                font-size: 16px;
-            }
-            
-            .container {
-                padding: 20px;
-            }
-            
-            .col-lg-8 {
-                max-width: 900px;
-                margin: 0 auto;
-            }
-            
-            .form-container {
-                height: calc(100vh - 40px);
-            }
-            
-            .form-header {
-                padding: 28px 36px 24px;
-            }
-            
-            .form-header h2 {
-                font-size: 2.1rem;
-            }
-            
-            .form-content {
-                padding: 32px 40px 28px;
-            }
-        }
+
+        {% block extra_css %}{% endblock %}
     </style>
-    
-    {% block extra_css %}{% endblock %}
 </head>
 <body>
-    <div class="container">
-        <div class="row justify-content-center">
-            <div class="col-lg-8 col-md-10">
-                <div class="form-container">
-                    {% block content %}{% endblock %}
-                </div>
-            </div>
+    <!-- Global Loader -->
+    <div class="global-loader" id="globalLoader">
+        <div class="loader-content">
+            <div class="spinner"></div>
+            <div class="loader-text">Cargando...</div>
         </div>
     </div>
-    
+
+    <!-- Mobile Header -->
+    <header class="mobile-header">
+        <button class="mobile-menu-btn" id="mobileMenuBtn">☰</button>
+        <h1 class="mobile-header-title">CAPIG</h1>
+        <div style="width: 44px;"></div> <!-- Spacer para centrar el título -->
+    </header>
+
+    <!-- Mobile Menu Toggle (Deprecated - solo para desktop pequeño) -->
+    <button class="menu-toggle" id="menuToggle">
+        <span>☰</span>
+    </button>
+
+    <!-- Sidebar Overlay -->
+    <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+    <!-- Sidebar Component -->
+    {% include 'components/sidebar.html' %}
+
+    <!-- Main Content -->
+    <main class="main-content">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <p>Desarrollado por Heimdal &copy; {{ current_year|default:"2025" }}</p>
+    </footer>
+
     <!-- jQuery -->
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     
-    <!-- Bootstrap 5 JS Bundle -->
+    <!-- Bootstrap 5 JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-    <!-- SweetAlert2 -->
-    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11.12.4/dist/sweetalert2.all.min.js" crossorigin="anonymous"></script>
     
     <!-- Select2 JS -->
     <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
-    
+
     <script>
-        // Manejo genérico de botones de envío: carga, bloqueo y alerta de error
-        (function() {
-            function withLoadingState(form) {
-                const submits = form.querySelectorAll('button[type="submit"], input[type="submit"]');
-                submits.forEach(btn => {
-                    if (!btn.dataset.originalText) {
-                        if (btn.tagName === 'BUTTON') {
-                            btn.dataset.originalText = btn.innerHTML;
-                        } else {
-                            btn.dataset.originalText = btn.value || 'Enviar';
-                        }
-                    }
-                });
+        $(document).ready(function() {
+            // Global loader para navegación
+            const $loader = $('#globalLoader');
+            let loaderTimeout;
+            let minDisplayTime = 300; // Mínimo 300ms para que se vea el loader
 
-                form.addEventListener('submit', (evt) => {
-                    try {
-                        submits.forEach(btn => {
-                            btn.disabled = true;
-                            if (btn.tagName === 'BUTTON') {
-                                btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Cargando...';
-                            } else {
-                                btn.value = 'Cargando...';
-                            }
-                        });
-                    } catch (error) {
-                        submits.forEach(btn => {
-                            btn.disabled = false;
-                            if (btn.tagName === 'BUTTON') {
-                                btn.innerHTML = btn.dataset.originalText || 'Enviar';
-                            } else {
-                                btn.value = btn.dataset.originalText || 'Enviar';
-                            }
-                        });
-                        if (window.Swal) {
-                            Swal.fire({
-                                icon: 'error',
-                                title: 'Error',
-                                text: 'Ocurrió un problema al enviar el formulario. Inténtalo de nuevo.',
-                            });
-                        }
-                        console.error('Error al procesar el envío del formulario:', error);
-                        // Evitar que el error silencioso oculte la excepción original
-                        throw error;
-                    }
-                });
-            }
-
-            function initForms() {
-                document.querySelectorAll('form').forEach(form => {
-                    if (form.dataset.loadingBound === 'true') return;
-                    form.dataset.loadingBound = 'true';
-                    withLoadingState(form);
-                });
-            }
-
-            document.addEventListener('DOMContentLoaded', initForms);
-            // Re-inicializar en navegaciones del historial (bfcache)
-            window.addEventListener('pageshow', initForms);
-        })();
-
-        // Protege formularios marcados con data-require-security usando SweetAlert2
-        (function() {
-            function bindSecurity(form) {
-                if (form.dataset.securityBound === 'true') return;
-                form.dataset.securityBound = 'true';
-
-                form.addEventListener('submit', function(evt) {
-                    const submitter = evt.submitter;
-                    const requires = submitter ? submitter.dataset.requireSecurity === 'true'
-                                               : form.dataset.requireSecurity === 'true';
-                    if (!requires) return;
-
-                    const hidden = form.querySelector('input[name="security_code"]');
-                    const alreadySet = hidden && hidden.value && hidden.value.length === 6;
-                    if (alreadySet) return; // ya validado en este ciclo
-                    evt.preventDefault();
-
-                    Swal.fire({
-                        title: 'Código de seguridad',
-                        text: 'Ingrese el código de 6 dígitos',
-                        input: 'text',
-                        inputAttributes: {
-                            maxlength: 6,
-                            inputmode: 'numeric',
-                            autocapitalize: 'off',
-                            autocomplete: 'one-time-code'
-                        },
-                        showCancelButton: true,
-                        confirmButtonText: 'Validar',
-                        cancelButtonText: 'Cancelar',
-                        preConfirm: (value) => {
-                            const val = (value || '').trim();
-                            if (val.length !== 6 || !/^\d{6}$/.test(val)) {
-                                Swal.showValidationMessage('Ingresa 6 dígitos numéricos');
-                                return false;
-                            }
-                            return val;
-                        }
-                    }).then(result => {
-                        if (result.isConfirmed && hidden) {
-                            hidden.value = result.value;
-                            form.submit();
-                        }
-                    }).catch(err => {
-                        console.error('Error mostrando el diálogo de seguridad:', err);
-                    });
-                });
-            }
-
-            function initSecurity() {
-                document.querySelectorAll('form').forEach(bindSecurity);
-            }
-
-            document.addEventListener('DOMContentLoaded', initSecurity);
-            window.addEventListener('pageshow', initSecurity);
-        })();
-
-        // Mostrar mensajes de Django como SweetAlert
-        {% if messages %}
-        (function() {
-            const msgs = [
-                {% for message in messages %}
-                {level: "{{ message.tags|default:'info' }}", text: "{{ message|escapejs }}"},
-                {% endfor %}
-            ];
-            msgs.forEach(msg => {
-                const icon = msg.level.includes('error') ? 'error' :
-                             msg.level.includes('warning') ? 'warning' :
-                             msg.level.includes('success') ? 'success' : 'info';
-                Swal.fire({icon, title: msg.text});
+            // Mostrar loader al hacer click en links de navegación
+            $('a[href]:not([target="_blank"])').on('click', function(e) {
+                const href = $(this).attr('href');
+                
+                // Ignorar links con # o javascript:
+                if (href && href !== '#' && !href.startsWith('javascript:')) {
+                    // Pequeño delay antes de mostrar el loader para navegaciones rápidas
+                    setTimeout(function() {
+                        $loader.addClass('active');
+                    }, 100);
+                }
             });
-        })();
-        {% endif %}
+
+            // Ocultar loader cuando la página termina de cargar
+            $(window).on('load', function() {
+                // Asegurar que el loader se muestre al menos minDisplayTime
+                setTimeout(function() {
+                    $loader.removeClass('active');
+                }, minDisplayTime);
+            });
+
+            // Ocultar loader si la navegación tarda mucho (timeout de seguridad)
+            $(document).on('click', 'a[href]', function() {
+                clearTimeout(loaderTimeout);
+                loaderTimeout = setTimeout(function() {
+                    $loader.removeClass('active');
+                }, 5000); // 5 segundos máximo
+            });
+
+            // Mobile menu toggle (ambos botones)
+            $('#menuToggle, #mobileMenuBtn').on('click', function() {
+                $('.sidebar').toggleClass('active');
+                $('#sidebarOverlay').toggleClass('active');
+            });
+
+            // Close sidebar when clicking overlay
+            $('#sidebarOverlay').on('click', function() {
+                $('.sidebar').removeClass('active');
+                $('#sidebarOverlay').removeClass('active');
+            });
+
+            // Close sidebar when clicking a nav link on mobile
+            $('.nav-link').on('click', function() {
+                if ($(window).width() <= 768) {
+                    $('.sidebar').removeClass('active');
+                    $('#sidebarOverlay').removeClass('active');
+                }
+            });
+
+            // Highlight active menu item based on current URL
+            const currentPath = window.location.pathname;
+            $('.nav-link').each(function() {
+                const linkPath = $(this).attr('href');
+                if (currentPath === linkPath || (linkPath !== '/' && currentPath.startsWith(linkPath))) {
+                    $(this).addClass('active');
+                }
+            });
+
+            // Initialize Select2 for all select elements
+            if ($.fn.select2) {
+                $('select').select2({
+                    theme: 'bootstrap-5',
+                    width: '100%'
+                });
+            }
+        });
     </script>
-    
+
     {% block extra_js %}{% endblock %}
 </body>
 </html>

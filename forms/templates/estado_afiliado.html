@@ -3,13 +3,13 @@
 {% block title %}Estado de Afiliado - CAPIG{% endblock %}
 
 {% block content %}
-<div class="form-header">
-    <h2>Consultar Estado de Afiliación</h2>
-    <p>Busca y actualiza el estado (Activo/Inactivo)</p>
-    <a href="{% url 'forms:home' %}" class="btn-back">← Menú Principal</a>
-</div>
-
-<div class="form-content">
+<div class="content-body">
+    <div class="content-actions">
+        <a href="{% url 'forms:dashboard' %}" class="btn-back">← Volver al Dashboard</a>
+    </div>
+    
+    <h2 class="content-title">Consultar Estado de Afiliación</h2>
+    <p class="content-subtitle">Busca y actualiza el estado (Activo/Inactivo)</p>
     <form method="POST" class="text-center">
         {% csrf_token %}
         <input type="hidden" name="security_code" value="">
@@ -61,4 +61,15 @@
         {% endif %}
     </form>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    $(document).ready(function() {
+        // Mostrar loader al enviar formulario
+        $('form').on('submit', function() {
+            $('#globalLoader').addClass('active');
+        });
+    });
+</script>
 {% endblock %}

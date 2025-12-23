@@ -1,5 +1,6 @@
 import os
 import logging
+import re
 from datetime import datetime
 from typing import Dict
 
@@ -37,6 +38,19 @@ def _get_base_datos_sheet():
     return get_google_sheet(sheet_id, "SOCIOS")
 
 
+def _get_all_records_flexible(sheet, head=2):
+    """
+    Lee registros intentando con el head indicado y, si falla (sheet vacío
+    o encabezados cambiados), vuelve a head=1. Devuelve lista vacía si nada funciona.
+    """
+    for h in (head, 1):
+        try:
+            return sheet.get_all_records(head=h)
+        except Exception:
+            continue
+    return []
+
+
 def buscar_afiliado_por_ruc(ruc):
     """
     Busca primero en ESTADO_SOCIO; si falta info, completa desde SOCIOS.
@@ -44,7 +58,7 @@ def buscar_afiliado_por_ruc(ruc):
     ruc = limpiar_ruc(ruc)
 
     estado_sheet = _get_estado_sheet()
-    estado_rows = estado_sheet.get_all_records()
+    estado_rows = _get_all_records_flexible(estado_sheet, head=1)
 
     afiliado = next(
         (row for row in estado_rows if limpiar_ruc(row.get("RUC", "")) == ruc),
@@ -61,49 +75,13 @@ def buscar_afiliado_por_ruc(ruc):
             "estado": afiliado.get("ESTADO", ""),
         }
 
-    # Buscar en la hoja SOCIOS sin validar encabezados
     base_sheet = _get_base_datos_sheet()
-    all_values = base_sheet.get_all_values()
-    
-    if len(all_values) < 2:
-        if afiliado:
-            return {
-                "razon_social": afiliado.get("RAZON_SOCIAL", ""),
-                "ciudad": afiliado.get("CIUDAD", ""),
-                "fecha_afiliacion": afiliado.get("FECHA_AFILIACION", ""),
-                "estado": afiliado.get("ESTADO", ""),
-            }
-        return None
-    
-    headers = all_values[0]
-    
-    # Buscar índices de las columnas
-    try:
-        ruc_idx = headers.index("RUC")
-        razon_idx = headers.index("RAZON_SOCIAL")
-        ciudad_idx = headers.index("CIUDAD")
-        fecha_idx = headers.index("FECHA_AFILIACION")
-    except ValueError:
-        # Si no encuentra las columnas en SOCIOS, usar lo que hay en ESTADO_SOCIO
-        if afiliado:
-            return {
-                "razon_social": afiliado.get("RAZON_SOCIAL", ""),
-                "ciudad": afiliado.get("CIUDAD", ""),
-                "fecha_afiliacion": afiliado.get("FECHA_AFILIACION", ""),
-                "estado": afiliado.get("ESTADO", ""),
-            }
-        return None
-    
-    # Buscar el RUC en los datos
-    base_row = None
-    for row in all_values[1:]:
-        if len(row) > ruc_idx and limpiar_ruc(row[ruc_idx]) == ruc:
-            base_row = {
-                "RAZON_SOCIAL": row[razon_idx] if len(row) > razon_idx else "",
-                "CIUDAD": row[ciudad_idx] if len(row) > ciudad_idx else "",
-                "FECHA_AFILIACION": row[fecha_idx] if len(row) > fecha_idx else "",
-            }
-            break
+    base_rows = _get_all_records_flexible(base_sheet, head=2)
+
+    base_row = next(
+        (row for row in base_rows if limpiar_ruc(row.get("RUC", "")) == ruc),
+        None,
+    )
 
     if afiliado:
         return {
@@ -155,32 +133,12 @@ def actualizar_estado_afiliado(ruc, nuevo_estado):
     # Si no se encontro el RUC, agregar nueva fila con datos base y estado actualizado
     if not encontrado:
         base_sheet = _get_base_datos_sheet()
-        all_values = base_sheet.get_all_values()
-        
-        if len(all_values) < 2:
-            return
-        
-        headers = all_values[0]
-        
-        # Buscar índices de las columnas
-        try:
-            ruc_idx = headers.index("RUC")
-            razon_idx = headers.index("RAZON_SOCIAL")
-            ciudad_idx = headers.index("CIUDAD")
-            fecha_idx = headers.index("FECHA_AFILIACION")
-        except ValueError:
-            return
-        
-        # Buscar el RUC en los datos
-        base_row = {}
-        for row in all_values[1:]:
-            if len(row) > ruc_idx and limpiar_ruc(row[ruc_idx]) == limpiar_ruc(ruc):
-                base_row = {
-                    "RAZON_SOCIAL": row[razon_idx] if len(row) > razon_idx else "",
-                    "CIUDAD": row[ciudad_idx] if len(row) > ciudad_idx else "",
-                    "FECHA_AFILIACION": row[fecha_idx] if len(row) > fecha_idx else "",
-                }
-                break
+        base_rows = _get_all_records_flexible(base_sheet, head=2)
+        base_row = next(
+            (row for row in base_rows if limpiar_ruc(
+                row.get("RUC", "")) == limpiar_ruc(ruc)),
+            {},
+        )
 
         # Orden esperado: RUC | RAZON_SOCIAL | FECHA_AFILIACION | ESTADO | CIUDAD | ACTUALIZACION_ESTADO
         new_row = [
@@ -198,33 +156,97 @@ def buscar_afiliado_por_ruc_base_datos(ruc):
     """Busca un afiliado únicamente en la hoja SOCIOS."""
     ruc = limpiar_ruc(ruc)
     sheet = _get_base_datos_sheet()
-    
-    # Obtener encabezados de la fila 1 y datos desde la fila 2
-    all_values = sheet.get_all_values()
-    if len(all_values) < 2:
-        return None
-    
-    headers = all_values[0]  # Primera fila como encabezados
-    
-    # Buscar índices de las columnas que necesitamos
-    try:
-        ruc_idx = headers.index("RUC")
-        razon_idx = headers.index("RAZON_SOCIAL")
-        ciudad_idx = headers.index("CIUDAD")
-        fecha_idx = headers.index("FECHA_AFILIACION")
-    except ValueError:
-        # Si no encuentra alguna columna, retornar None
-        return None
-    
-    # Buscar en los datos (desde fila 2 en adelante)
-    for row in all_values[1:]:
-        if len(row) > ruc_idx and limpiar_ruc(row[ruc_idx]) == ruc:
+    rows = _get_all_records_flexible(sheet, head=2)
+    for row in rows:
+        if limpiar_ruc(row.get("RUC", "")) == ruc:
             return {
-                "razon_social": row[razon_idx] if len(row) > razon_idx else "",
-                "ciudad": row[ciudad_idx] if len(row) > ciudad_idx else "",
-                "fecha_afiliacion": row[fecha_idx] if len(row) > fecha_idx else "",
+                "razon_social": row.get("RAZON_SOCIAL", ""),
+                "ciudad": row.get("CIUDAD", ""),
+                "fecha_afiliacion": row.get("FECHA_AFILIACION", ""),
             }
     return None
+
+
+def obtener_ventas_por_ruc(ruc):
+    """Obtiene ventas históricas del afiliado desde VENTAS_SOCIO y, si no hay, desde columnas por año en SOCIOS."""
+    ruc_norm = limpiar_ruc(ruc)
+    if not ruc_norm:
+        return []
+
+    sheet_id = os.getenv("SHEET_PATH") or getattr(settings, "SHEET_PATH", "")
+    if not sheet_id:
+        return []
+
+    try:
+        sheet = get_google_sheet(sheet_id, "VENTAS_SOCIO")
+    except Exception:
+        return []
+
+    rows = _get_all_records_flexible(sheet, head=2)
+    ventas = []
+    for row in rows:
+        if limpiar_ruc(row.get("RUC", "")) != ruc_norm:
+            continue
+        anio = str(row.get("ANIO") or row.get("AÑO")
+                   or row.get("ANO") or "").strip()
+        comparativo = row.get("COMPARATIVO", "")
+        ventas_estimadas = (
+            row.get("VENTAS_ESTIMADAS")
+            or row.get("MONTO_ESTIMADO")
+            or row.get("MONTO_VENTAS")
+            or row.get("VENTAS_ESTIMADA")
+            or ""
+        )
+        fecha_registro = row.get("FECHA_REGISTRO", "") or row.get("FECHA", "")
+        ventas.append(
+            {
+                "anio": anio,
+                "comparativo": comparativo,
+                "ventas_estimadas": ventas_estimadas,
+                "fecha_registro": fecha_registro,
+            }
+        )
+
+    # Fallback: buscar columnas por año (ej. 2019, 2020) en la hoja SOCIOS
+    try:
+        base_sheet = get_google_sheet(sheet_id, "SOCIOS")
+        base_rows = _get_all_records_flexible(base_sheet, head=2)
+    except Exception:
+        base_rows = []
+
+    if base_rows:
+        try:
+            base_row = next(
+                (row for row in base_rows if limpiar_ruc(
+                    row.get("RUC", "")) == ruc_norm),
+                None,
+            )
+        except Exception:
+            base_row = None
+        if base_row:
+            existing_years = {v.get("anio") for v in ventas if v.get("anio")}
+            for key, value in base_row.items():
+                key_str = (key or "").strip()
+                if not key_str or not re.fullmatch(r"\d{4}", key_str):
+                    continue
+                if key_str in existing_years:
+                    continue
+                val_str = (value or "").strip() if isinstance(
+                    value, str) else value
+                if val_str in ("", None):
+                    continue
+                ventas.append(
+                    {
+                        "anio": key_str,
+                        "comparativo": "",
+                        "ventas_estimadas": val_str,
+                        "fecha_registro": "",
+                    }
+                )
+
+    # Ordenar desc por año si es numérico
+    ventas.sort(key=lambda v: v.get("anio") or "", reverse=True)
+    return ventas
 
 
 def guardar_ventas_afiliado(data: Dict[str, str]):
