@@ -15,6 +15,7 @@ const Dash2Module = (function () {
     OUT_TRANSITIONS: "PIVOT_CAMBIO_TAMANO_ANIO",
     OUT_2023: "DASH_CAMBIO_TAMANO_2023",
     OUT_TRANSITIONS_SUMMARY: "DASH_TRANSICIONES",
+    OUT_MASTER: "DASH2_MAESTRA",
   };
 
   const TAMANO_BY_CODE = { 1: "MICRO", 2: "PEQUENA", 3: "MEDIANA", 4: "GRANDE" };
@@ -25,6 +26,9 @@ const Dash2Module = (function () {
     { max: 5000000, label: "MEDIANA" },
     { max: Number.POSITIVE_INFINITY, label: "GRANDE" },
   ];
+  const USE_BASE_FOR_SIZE = true; // habilitado para usar columnas T202x de SOCIOS
+  const USE_REGISTRO_FOR_SIZE = false; // mantenemos deshabilitado registro para no inflar anios
+  const MIN_YEAR_FOR_SIZE = 2019; // limitar anios a periodos con ventas
 
   const FIELD_ALIASES = {
     RUC: ["RUC", "NUMERO_RUC", "NUM_RUC"],
@@ -50,7 +54,16 @@ const Dash2Module = (function () {
     TAMANO: ["TAMANO", "TAMANO_EMPRESA", "TAMANIO", "TAMAï¿½'O", "TAMANO_EMP"],
     SECTOR: ["SECTOR", "SECTOR "],
     FECHA_AF: ["FECHA_AFILIACION", "FECHA AFILIACION", "FECHA_INGRESO", "FECHA DE INGRESO", "FECHA_REGISTRO"],
-    VENTAS: ["VENTAS", "VENTAS_ANUAL", "VENTAS_ANUALES", "VENTAS_MONT_EST", "MONTO_ESTIMADO", "MONTO_TOTAL", "VALOR TOTAL"],
+    VENTAS: [
+      "VENTAS",
+      "VENTAS_ANUAL",
+      "VENTAS_ANUALES",
+      "VENTAS_MONT_EST",
+      "MONTO_ESTIMADO",
+      "MONTO_VENTAS",
+      "MONTO_TOTAL",
+      "VALOR TOTAL",
+    ],
     ANIO: ["ANIO", "ANO", "Aï¿½'O", "ANIO_VENTA", "ANO_VENTA", "Aï¿½'O_VENTA", "Aï¿½'O VENTA"],
   };
 
@@ -87,13 +100,21 @@ const Dash2Module = (function () {
     if (t.indexOf("GRAN") !== -1) return "GRANDE";
     return t;
   }
+  function normalizeTamanoClean(val) {
+    const t = normalizeTamano(val);
+    if (!t) return "";
+    if (t === "NO REPORTA" || t === "NO_REPORTA" || t === "NO" || t === "N O EPORTA") return "";
+    if (TAMANO_ORDER[t]) return t;
+    return "";
+  }
   function toNumber(val) {
     if (val === null || val === undefined || val === "") return 0;
     let str = val.toString().trim().replace(/\s/g, "");
     const hasComma = str.indexOf(",") !== -1;
     const hasDot = str.indexOf(".") !== -1;
     if (hasComma && hasDot) {
-      str = str.replace(/\./g, "").replace(/,/g, ".");
+      // Asumimos formato "1,234,567.89": quitar comas (miles) y dejar el punto como decimal
+      str = str.replace(/,/g, "");
     } else if (hasComma) {
       str = str.replace(/,/g, ".");
     } else if (hasDot) {
@@ -124,6 +145,12 @@ const Dash2Module = (function () {
     const d = parseDateFlexible(val);
     return d ? d.getFullYear().toString() : "";
   }
+  function detectYearFromHeader(key) {
+    if (!key) return "";
+    const norm = key.toString().trim().toUpperCase();
+    const match = norm.match(/^(?:T_?)?(\d{4})(?:\D.*)?$/); // acepta 2019, T2019, T_2019, 2019_USD
+    return match ? match[1] : "";
+  }
   function getSheetOrCreate(name) {
     const ss = SpreadsheetApp.getActive();
     let sh = ss.getSheetByName(name);
@@ -144,9 +171,9 @@ const Dash2Module = (function () {
   function sizeFromCode(val) {
     const code = (val || "").toString().trim();
     if (TAMANO_BY_CODE[code]) return TAMANO_BY_CODE[code];
-    return normalizeTamano(val);
+    return normalizeTamanoClean(val);
   }
-  function entityKey(headerIndex, row) {
+  function entityKey(headerIndex, row, rowIdx) {
     const ruc = padRuc13(getVal(row, headerIndex, FIELD_ALIASES.RUC));
     const razon = normalizeName(getVal(row, headerIndex, FIELD_ALIASES.RAZON));
     const altId = normalizeKey(getVal(row, headerIndex, FIELD_ALIASES.ALT_ID || []));
@@ -154,7 +181,10 @@ const Dash2Module = (function () {
       if (ruc) return `${ruc}__${altId}`;
       return `ID__${altId}`;
     }
-    return ruc || razon || "";
+    if (ruc) return ruc;
+    if (razon) return razon;
+    // Fallback para filas sin identificadores (contar por fila para no perder registros)
+    return rowIdx !== undefined ? `ROW_${rowIdx}` : "";
   }
   // ------------------ Readers ------------------ //
   function readTableFlexible(sheetName) {
@@ -222,64 +252,101 @@ const Dash2Module = (function () {
 
   // ------------------ Builders ------------------ //
   function collectTamanoByYear() {
-    const records = new Map(); // key => {ruc, razon, year, tamano, fuente, priority}
-    function addRecord({ ruc, razon, year, tamano, fuente, priority }) {
+    const records = new Map(); // key => {key, ruc, razon, altId, year, tamano, fuente, priority}
+    function addRecord({ ruc, razon, altId, year, tamano, fuente, priority }) {
       if (!year || !tamano) return;
-      const keyEntity = ruc || normalizeName(razon);
+      const keyEntity = ruc || normalizeName(razon) || altId;
       if (!keyEntity) return;
       const recKey = `${keyEntity}||${year}`;
       const existing = records.get(recKey);
       if (existing && existing.priority <= priority) return;
-      records.set(recKey, { ruc, razon, year, tamano, fuente, priority });
+      records.set(recKey, { key: keyEntity, ruc, razon, altId, year, tamano, fuente, priority });
     }
 
-    // BASE (SOCIOS) con dos bloques
-    const ss = SpreadsheetApp.getActive();
-    const baseSheetName = [DASH2_SHEETS.BASE, DASH2_SHEETS.BASE_FALLBACK].find((n) => n && ss.getSheetByName(n));
-    const shBase = baseSheetName ? ss.getSheetByName(baseSheetName) : null;
-    if (shBase) {
-      const values = shBase.getDataRange().getDisplayValues();
-      const blocks = splitBlocksByHeader(values);
-      blocks.forEach((block) => {
-        const { headerIndex, rows } = block;
-        const yearCols = Object.keys(headerIndex).filter((k) => /^T_?\d{4}$/.test(k));
-        rows.forEach((row) => {
-          const ruc = padRuc13(getVal(row, headerIndex, FIELD_ALIASES.RUC));
-          const razon = normalizeName(getVal(row, headerIndex, FIELD_ALIASES.RAZON));
-          yearCols.forEach((colKey) => {
-            const val = row[headerIndex[colKey]];
-            const tam = sizeFromCode(val);
-            const year = colKey.replace(/^T_?/, "");
-            if (tam) addRecord({ ruc, razon, year, tamano: tam, fuente: baseSheetName || DASH2_SHEETS.BASE, priority: 1 });
+    // BASE (SOCIOS) con dos bloques - deshabilitado para limitar a años con ventas
+    if (USE_BASE_FOR_SIZE) {
+      const ss = SpreadsheetApp.getActive();
+      const baseSheetName = [DASH2_SHEETS.BASE, DASH2_SHEETS.BASE_FALLBACK].find((n) => n && ss.getSheetByName(n));
+      const shBase = baseSheetName ? ss.getSheetByName(baseSheetName) : null;
+      if (shBase) {
+        const values = shBase.getDataRange().getDisplayValues();
+        const blocks = splitBlocksByHeader(values);
+        blocks.forEach((block) => {
+          const { headerIndex, rows } = block;
+          const yearCols = Object.keys(headerIndex)
+            .map((k) => ({ key: k, year: detectYearFromHeader(k) }))
+            .filter((y) => y.year);
+          rows.forEach((row, idx) => {
+              const ruc = padRuc13(getVal(row, headerIndex, FIELD_ALIASES.RUC));
+              const razon = normalizeName(getVal(row, headerIndex, FIELD_ALIASES.RAZON));
+              const altId = normalizeKey(getVal(row, headerIndex, FIELD_ALIASES.ALT_ID || []));
+              const keyRow = entityKey(headerIndex, row, idx);
+              yearCols.forEach(({ key: colKey, year }) => {
+                const val = row[headerIndex[colKey]];
+                let tam = sizeFromCode(val);
+              if (!tam) {
+                const monto = toNumber(val);
+                if (monto > 0) {
+                  for (const rule of TAMANO_BY_MONTO) {
+                    if (monto <= rule.max) {
+                      tam = rule.label;
+                      break;
+                    }
+                  }
+                }
+              }
+              if (tam && parseInt(year, 10) >= MIN_YEAR_FOR_SIZE) {
+                addRecord({ ruc, razon, altId: altId || keyRow, year, tamano: tam, fuente: baseSheetName || DASH2_SHEETS.BASE, priority: 1 });
+              }
+            });
+            const tamExplicit = normalizeTamanoClean(getVal(row, headerIndex, FIELD_ALIASES.TAMANO));
+            const yearAf = getYear(getVal(row, headerIndex, FIELD_ALIASES.FECHA_AF));
+            if (tamExplicit && yearAf && parseInt(yearAf, 10) >= MIN_YEAR_FOR_SIZE) {
+              addRecord({ ruc, razon, altId: altId || keyRow, year: yearAf, tamano: tamExplicit, fuente: baseSheetName || DASH2_SHEETS.BASE, priority: 2 });
+            }
           });
-          const tamExplicit = normalizeTamano(getVal(row, headerIndex, FIELD_ALIASES.TAMANO));
-          const yearAf = getYear(getVal(row, headerIndex, FIELD_ALIASES.FECHA_AF));
-          if (tamExplicit && yearAf) {
-            addRecord({ ruc, razon, year: yearAf, tamano: tamExplicit, fuente: baseSheetName || DASH2_SHEETS.BASE, priority: 2 });
-          }
         });
+      }
+    }
+
+    // REGISTRO_AFILIADO (si existe) usa FECHA_AFILIACION para asignar anio - deshabilitado para limitar a años con ventas
+    if (USE_REGISTRO_FOR_SIZE) {
+      const registro = readTableFlexibleByCandidates([DASH2_SHEETS.REGISTRO, DASH2_SHEETS.REGISTRO_FALLBACK]);
+      registro.rows.forEach((row, idx) => {
+        const ruc = padRuc13(getVal(row, registro.headerIndex, FIELD_ALIASES.RUC));
+        const razon = normalizeName(getVal(row, registro.headerIndex, FIELD_ALIASES.RAZON));
+        const altId = normalizeKey(getVal(row, registro.headerIndex, FIELD_ALIASES.ALT_ID || []));
+        const tam = normalizeTamano(getVal(row, registro.headerIndex, FIELD_ALIASES.TAMANO));
+        const year = getYear(getVal(row, registro.headerIndex, FIELD_ALIASES.FECHA_AF));
+        const keyRow = entityKey(registro.headerIndex, row, idx);
+        if (tam && year) addRecord({ ruc, razon, altId: altId || keyRow, year, tamano: tam, fuente: DASH2_SHEETS.REGISTRO, priority: 3 });
       });
     }
 
-    // REGISTRO_AFILIADO (si existe) usa FECHA_AFILIACION para asignar anio
-    const registro = readTableFlexibleByCandidates([DASH2_SHEETS.REGISTRO, DASH2_SHEETS.REGISTRO_FALLBACK]);
-    registro.rows.forEach((row) => {
-      const ruc = padRuc13(getVal(row, registro.headerIndex, FIELD_ALIASES.RUC));
-      const razon = normalizeName(getVal(row, registro.headerIndex, FIELD_ALIASES.RAZON));
-      const tam = normalizeTamano(getVal(row, registro.headerIndex, FIELD_ALIASES.TAMANO));
-      const year = getYear(getVal(row, registro.headerIndex, FIELD_ALIASES.FECHA_AF));
-      if (tam && year) addRecord({ ruc, razon, year, tamano: tam, fuente: DASH2_SHEETS.REGISTRO, priority: 3 });
-    });
-
     // VENTAS_AFILIADOS: clasifica por monto o tamano declarado
     const ventas = readTableFlexibleByCandidates([DASH2_SHEETS.VENTAS, DASH2_SHEETS.VENTAS_FALLBACK]);
-    ventas.rows.forEach((row) => {
+    ventas.rows.forEach((row, idx) => {
       const ruc = padRuc13(getVal(row, ventas.headerIndex, FIELD_ALIASES.RUC));
       const razon = normalizeName(getVal(row, ventas.headerIndex, FIELD_ALIASES.RAZON));
-      const year = getVal(row, ventas.headerIndex, FIELD_ALIASES.ANIO) || getYear(getVal(row, ventas.headerIndex, FIELD_ALIASES.FECHA_AF));
-      let tam = normalizeTamano(getVal(row, ventas.headerIndex, FIELD_ALIASES.TAMANO));
+      const altId = normalizeKey(getVal(row, ventas.headerIndex, FIELD_ALIASES.ALT_ID || []));
+      let year = getVal(row, ventas.headerIndex, FIELD_ALIASES.ANIO) || getYear(getVal(row, ventas.headerIndex, FIELD_ALIASES.FECHA_AF));
+      let montoCell = getVal(row, ventas.headerIndex, FIELD_ALIASES.VENTAS);
+
+      // Fallback: si no hay año declarado, intentar columnas numéricas (ej. 2019, 2020) con valores
+      if (!year) {
+        for (const [key, idx] of Object.entries(ventas.headerIndex)) {
+          const detectedYear = detectYearFromHeader(key);
+          if (detectedYear && idx < row.length && row[idx] !== "") {
+            year = detectedYear;
+            montoCell = row[idx];
+            break;
+          }
+        }
+      }
+
+      let tam = normalizeTamanoClean(getVal(row, ventas.headerIndex, FIELD_ALIASES.TAMANO));
       if (!tam) {
-        const monto = toNumber(getVal(row, ventas.headerIndex, FIELD_ALIASES.VENTAS));
+        const monto = toNumber(montoCell);
         if (monto > 0) {
           for (const rule of TAMANO_BY_MONTO) {
             if (monto <= rule.max) {
@@ -289,41 +356,46 @@ const Dash2Module = (function () {
           }
         }
       }
-      if (tam && year) addRecord({ ruc, razon, year, tamano: tam, fuente: DASH2_SHEETS.VENTAS, priority: 4 });
+      if (tam && year && parseInt(year, 10) >= MIN_YEAR_FOR_SIZE) {
+        const keyRow = entityKey(ventas.headerIndex, row, idx);
+        addRecord({ ruc, razon, altId: altId || keyRow, year, tamano: tam, fuente: DASH2_SHEETS.VENTAS, priority: 4 });
+      }
     });
 
-    const detailRows = Array.from(records.values()).map((r) => [
-      r.ruc,
-      r.razon,
-      r.year,
-      r.tamano,
-      r.fuente,
-    ]);
-    detailRows.sort((a, b) => {
-      if (a[2] !== b[2]) return a[2].localeCompare(b[2]);
-      if (a[3] !== b[3]) return a[3].localeCompare(b[3]);
-      return (a[0] || "").localeCompare(b[0] || "");
+    const detailRecords = Array.from(records.values());
+    detailRecords.sort((a, b) => {
+      const yearA = String(a.year || "");
+      const yearB = String(b.year || "");
+      if (yearA !== yearB) return yearA.localeCompare(yearB);
+      const tamA = String(a.tamano || "");
+      const tamB = String(b.tamano || "");
+      if (tamA !== tamB) return tamA.localeCompare(tamB);
+      return String(a.ruc || "").localeCompare(String(b.ruc || ""));
     });
 
+    const detailRowsForSheet = detailRecords.map((r) => [r.ruc, r.razon, r.year, r.tamano, r.fuente]);
     const shDetail = getSheetOrCreate(DASH2_SHEETS.OUT_DETAIL);
     shDetail.clear();
     const headers = ["RUC", "RAZON_SOCIAL", "ANIO", "TAMANO", "FUENTE"];
-    const out = detailRows.length ? [headers, ...detailRows] : [headers];
+    const out = detailRowsForSheet.length ? [headers, ...detailRowsForSheet] : [headers];
     shDetail.getRange(1, 1, out.length, headers.length).setValues(out);
     shDetail.autoResizeColumns(1, headers.length);
 
-    return detailRows;
+    return detailRecords;
   }
 
   function buildTransitions(detailRows) {
     const byEntity = new Map();
-    detailRows.forEach((row) => {
-      const ruc = row[0];
-      const razon = row[1];
-      const year = parseInt(row[2], 10);
-      const tam = row[3];
+    const isArrayRow = Array.isArray(detailRows[0]);
+    detailRows.forEach((row, idx) => {
+      const ruc = isArrayRow ? row[0] : row.ruc;
+      const razon = isArrayRow ? row[1] : row.razon;
+      const tam = isArrayRow ? row[3] : row.tamano;
+      const year = parseInt(isArrayRow ? row[2] : row.year, 10);
       if (!year || !tam) return;
-      const key = ruc || normalizeName(razon);
+      const key = isArrayRow
+        ? ruc || normalizeName(razon) || `ROW_${idx}`
+        : row.key || row.altId || ruc || normalizeName(razon) || `ROW_${idx}`;
       if (!key) return;
       if (!byEntity.has(key)) byEntity.set(key, []);
       byEntity.get(key).push({ year, tam, ruc, razon });
@@ -335,7 +407,7 @@ const Dash2Module = (function () {
       for (let i = 0; i < hist.length - 1; i++) {
         const a = hist[i];
         const b = hist[i + 1];
-        if (!a.tam || !b.tam || a.tam === b.tam) continue;
+        if (!a.tam || !b.tam) continue;
         transitions.push({
           entity: key,
           anioInicial: a.year.toString(),
@@ -345,12 +417,24 @@ const Dash2Module = (function () {
           delta: (TAMANO_ORDER[b.tam] || 0) - (TAMANO_ORDER[a.tam] || 0),
         });
       }
+      // Asegurar que el último año también aparezca como transición consigo mismo (para que salga en el slicer)
+      const last = hist[hist.length - 1];
+      if (last && last.tam) {
+        transitions.push({
+          entity: key,
+          anioInicial: last.year.toString(),
+          anioFinal: last.year.toString(),
+          tamInicial: last.tam,
+          tamFinal: last.tam,
+          delta: 0,
+        });
+      }
     });
 
     const originTotals = new Map(); // key anio|tam -> total de empresas con ese tamano en el anio
     detailRows.forEach((row) => {
-      const year = row[2];
-      const tam = row[3];
+      const year = isArrayRow ? row[2] : row.year;
+      const tam = isArrayRow ? row[3] : row.tamano;
       if (!year || !tam) return;
       const key = `${year}||${tam}`;
       originTotals.set(key, (originTotals.get(key) || 0) + 1);
@@ -367,20 +451,28 @@ const Dash2Module = (function () {
       const originTotal = originTotals.get(`${anioIni}||${tamIni}`) || 0;
       const pct = originTotal ? count / originTotal : 0;
       const delta = (TAMANO_ORDER[tamFin] || 0) - (TAMANO_ORDER[tamIni] || 0);
-      const direccion = delta > 0 ? "CRECIMIENTO" : "DECRECIMIENTO";
+      const direccion = delta > 0 ? "CRECIMIENTO" : delta < 0 ? "DECRECIMIENTO" : "SIN_CAMBIO";
       const ordenIni = TAMANO_ORDER[tamIni] || 99;
       const ordenFin = TAMANO_ORDER[tamFin] || 99;
       return [anioIni, anioFin, tamIni, tamFin, ordenIni, ordenFin, count, pct, direccion, delta];
     });
 
     pivotRows.sort((a, b) => {
-      if (a[0] !== b[0]) return a[0].localeCompare(b[0]);
-      if (a[1] !== b[1]) return a[1].localeCompare(b[1]);
+      const anioIniA = String(a[0] || "");
+      const anioIniB = String(b[0] || "");
+      if (anioIniA !== anioIniB) return anioIniA.localeCompare(anioIniB);
+      const anioFinA = String(a[1] || "");
+      const anioFinB = String(b[1] || "");
+      if (anioFinA !== anioFinB) return anioFinA.localeCompare(anioFinB);
       if (a[4] !== b[4]) return a[4] - b[4]; // ORDEN_INICIAL
       if (a[5] !== b[5]) return a[5] - b[5]; // ORDEN_FINAL
-      if (a[8] !== b[8]) return a[8].localeCompare(b[8]); // DIRECCION
+      const dirA = String(a[8] || "");
+      const dirB = String(b[8] || "");
+      if (dirA !== dirB) return dirA.localeCompare(dirB); // DIRECCION
       if (a[9] !== b[9]) return a[9] - b[9]; // DELTA
-      return a[2].localeCompare(b[2]); // TAMANO_INICIAL
+      const tamA = String(a[2] || "");
+      const tamB = String(b[2] || "");
+      return tamA.localeCompare(tamB); // TAMANO_INICIAL
     });
 
     const shPivot = getSheetOrCreate(DASH2_SHEETS.OUT_TRANSITIONS);
@@ -446,11 +538,20 @@ const Dash2Module = (function () {
       `${r[6]} (${(r[7] * 100).toFixed(2)}%)`, // ETIQUETA_FINAL (cantidad + porcentaje)
     ]);
     summaryRows.sort((a, b) => {
-      if (a[0] !== b[0]) return a[0].localeCompare(b[0]);
-      if (a[8] !== b[8]) return a[8].localeCompare(b[8]); // CRECIMIENTO/DECRECIMIENTO
-      if (a[4] !== b[4]) return a[4] - b[4];
-      if (a[5] !== b[5]) return a[5] - b[5];
-      return a[1].localeCompare(b[1]);
+      const anioA = String(a[0] || "");
+      const anioB = String(b[0] || "");
+      if (anioA !== anioB) return anioA.localeCompare(anioB);
+
+      const dirA = String(a[8] || "");
+      const dirB = String(b[8] || "");
+      if (dirA !== dirB) return dirA.localeCompare(dirB); // CRECIMIENTO/DECRECIMIENTO/SIN_CAMBIO
+
+      if (a[4] !== b[4]) return (a[4] || 0) - (b[4] || 0);
+      if (a[5] !== b[5]) return (a[5] || 0) - (b[5] || 0);
+
+      const transA = String(a[1] || "");
+      const transB = String(b[1] || "");
+      return transA.localeCompare(transB);
     });
     const shSummary = getSheetOrCreate(DASH2_SHEETS.OUT_TRANSITIONS_SUMMARY);
     shSummary.clear();
@@ -470,6 +571,48 @@ const Dash2Module = (function () {
     const outSummary = summaryRows.length ? [headersSummary, ...summaryRows] : [headersSummary];
     shSummary.getRange(1, 1, outSummary.length, headersSummary.length).setValues(outSummary);
     shSummary.autoResizeColumns(1, headersSummary.length);
+
+    // Hoja maestra con anio inicial y final (para usar ambos slicers en una sola fuente)
+    const masterRows = pivotRows.map((r) => {
+      const trans = `${r[2]} -> ${r[3]}`;
+      const etiqueta = `${r[6]} (${(r[7] * 100).toFixed(2)}%)`;
+      return [r[0], r[1], trans, r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], etiqueta];
+    });
+    masterRows.sort((a, b) => {
+      const anioFinA = String(a[1] || "");
+      const anioFinB = String(b[1] || "");
+      if (anioFinA !== anioFinB) return anioFinA.localeCompare(anioFinB); // ANIO_FINAL
+
+      const anioIniA = String(a[0] || "");
+      const anioIniB = String(b[0] || "");
+      if (anioIniA !== anioIniB) return anioIniA.localeCompare(anioIniB); // ANIO_INICIAL
+
+      const dirA = String(a[8] || "");
+      const dirB = String(b[8] || "");
+      if (dirA !== dirB) return dirA.localeCompare(dirB); // DIRECCION
+
+      if (a[5] !== b[5]) return (a[5] || 0) - (b[5] || 0); // ORDEN_FINAL
+      return (a[4] || 0) - (b[4] || 0); // ORDEN_INICIAL
+    });
+    const shMaster = getSheetOrCreate(DASH2_SHEETS.OUT_MASTER);
+    shMaster.clear();
+    const headersMaster = [
+      "ANIO_INICIAL",
+      "ANIO_FINAL",
+      "TRANSICION",
+      "TAMANO_INICIAL",
+      "TAMANO_FINAL",
+      "ORDEN_INICIAL",
+      "ORDEN_FINAL",
+      "EMPRESAS",
+      "PCT_ORIGEN",
+      "DIRECCION",
+      "DELTA",
+      "ETIQUETA_FINAL",
+    ];
+    const outMaster = masterRows.length ? [headersMaster, ...masterRows] : [headersMaster];
+    shMaster.getRange(1, 1, outMaster.length, headersMaster.length).setValues(outMaster);
+    shMaster.autoResizeColumns(1, headersMaster.length);
   }
 
   return { collectTamanoByYear, buildTransitions };

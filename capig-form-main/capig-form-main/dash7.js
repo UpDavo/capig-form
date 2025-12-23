@@ -8,9 +8,10 @@
   const SHEETS = {
     BASE: "SOCIOS",
     BASE_FALLBACK: "BASE DE DATOS",
-    DIAG_DJANGO: "DIAGNOSTICOS",
-    DIAG_DJANGO_FALLBACK: "DIAGNOSTICO_FINAL",
+    DIAG_DJANGO: "ASESORIAS",
+    DIAG_DJANGO_FALLBACK: "DIAGNOSTICOS",
     DIAG_HIST: "DIAGNOSTICOS_HISTORICOS",
+    LEGAL_UNIFICADO: "LEGAL_UNIFICADO",
     OUT_RESUMEN: "PIVOT_ASESORIAS_RESUMEN_ANIO",
     OUT_SUBTIPO: "PIVOT_ASESORIAS_SUBTIPO_ANIO",
     OUT_EMPRESAS: "PIVOT_ASESORIAS_POR_EMPRESA",
@@ -22,8 +23,10 @@
   const NO_DATE_YEAR = "SIN_FECHA";
   const DEFAULT_HIST_YEAR = "2025";
   const TYPE_COLUMNS = ["LEAN", "ESTRATEGIA", "LEGAL", "AMBIENTE", "RRHH"];
-  const ALLOWED_SUBTIPOS = ["LABORAL", "SOCIETARIO", "PROPIEDAD INTELECTUAL", "CONTACTO", "OTROS"];
+  const ALLOWED_SUBTIPOS = ["LABORAL", "SOCIETARIO", "PROPIEDAD INTELECTUAL", "OTROS"];
   const LEGAL_SHEETS = ["LEGAL 1", "LEGAL1", "LEGAL_1", "LEGAL 2", "LEGAL2", "LEGAL_2"];
+  const LEGAL_PROP_INT_ALIASES = ["PROPIEDAD_INTELECTUAL", "PROPIEDAD INTELECTUAL", "INTELECTUAL"];
+  const LEGAL_TAMANO_ALIASES = ["TAMANO", "TAMANIO"];
   const ALT_ID_ALIASES = [
     "ID_UNICO",
     "ID UNICO",
@@ -43,6 +46,7 @@
     "NUMERO",
   ];
   const TOTAL_ASESORIAS_ALIASES = [
+    "TOTAL",
     "TOTAL_ASESORIAS",
     "TOTAL ASESORIAS",
     "TOTAL_ASESORIA",
@@ -86,6 +90,9 @@
     "SUBTIPO",
     "SUBTIPO DIAGNOSTICO",
     "SUBTIPO DE DIAGNOSTICO",
+    "SUBTIPO_DE_ASESORIA",
+    "SUBTIPO DE ASESORIA",
+    "SUBTIPO ASESORIA",
     "OTROS_SUBTIPO",
     "OTROS SUBTIPO",
   ];
@@ -368,12 +375,19 @@
     Logger.log("[DASH7] Iniciando generacion...");
 
     const base = readTableFlexibleByCandidates([SHEETS.BASE, SHEETS.BASE_FALLBACK]);
-    const diagDjango = readTableFlexibleByCandidates([SHEETS.DIAG_DJANGO, SHEETS.DIAG_DJANGO_FALLBACK, "DIAGNOSTICO"]);
+    const diagDjango = readTableFlexibleByCandidates([
+      SHEETS.DIAG_DJANGO,
+      SHEETS.DIAG_DJANGO_FALLBACK,
+      "DIAGNOSTICO_FINAL",
+      "DIAGNOSTICO",
+    ]);
     const diagHist = { headerIndex: {}, rows: [] }; // historico fuera de uso (ya consolidado en DIAGNOSTICOS)
+    const legalUnified = readTableFlexibleByCandidates([SHEETS.LEGAL_UNIFICADO, ...LEGAL_SHEETS]);
+    const legalTables = LEGAL_SHEETS.map((name) => ({ name, ...readTableFlexible(name) })).filter((t) => t.rows.length);
+    const legalSources = legalUnified.rows.length ? [legalUnified] : legalTables;
+    const useLegalSheetsOnly = legalSources.some((t) => t.rows.length > 0);
 
-    Logger.log(`[DASH7] Filas DIAGNOSTICOS: ${diagDjango.rows.length} | Filas historico: ${diagHist.rows.length}`);
-    const legalSheets = [];
-    const hasLegalSheets = false;
+    Logger.log(`[DASH7] Filas ${SHEETS.DIAG_DJANGO}: ${diagDjango.rows.length} | Filas historico: ${diagHist.rows.length}`);
 
     const baseMap = new Map();
     const aliasToRuc = new Map();
@@ -382,6 +396,7 @@
     const empresaTamAsignado = new Map();
     const empresasBaseAsePorTam = new Map();
     const empresasRawAsePorTam = new Map();
+    const empresasLegalDenomPorTam = new Map();
 
     base.rows.forEach((row) => {
       const ruc = padRuc13(getVal(row, base.headerIndex, ["RUC"]));
@@ -405,7 +420,10 @@
     });
     Logger.log(`[DASH7] Empresas base: ${baseMap.size}`);
 
-    applyManualAliases(aliasToRuc, baseMap);
+    // En modo solo LEGAL evitamos alias manuales para no colapsar empresas distintas.
+    if (!useLegalSheetsOnly) {
+      applyManualAliases(aliasToRuc, baseMap);
+    }
 
     const asesoriasBuckets = new Map(); // key: entity|anio (dedup por empresa y anio)
     const asesorias = [];
@@ -419,8 +437,6 @@
     let debugUsefulRowsDjango = 0;
     let debugUsefulRowsHist = 0;
     let legalRowsProcessed = 0;
-    let useLegalSheetsOnly = false;
-
     let djangoFallbackYear = "";
     diagDjango.rows.forEach((row) => {
       const y = getYear(getVal(row, diagDjango.headerIndex, ["FECHA", "FECHA_DIAGNOSTICO", "FECHA DE DIAGNOSTICO"]));
@@ -433,7 +449,9 @@
       (row) => !getYear(getVal(row, diagDjango.headerIndex, ["FECHA", "FECHA_DIAGNOSTICO", "FECHA DE DIAGNOSTICO"]))
     );
     const shouldProcessHist = false;
-    Logger.log(`[DASH7] Historico embebido en DIAGNOSTICOS: ${hasHistInsideDjango ? "SI" : "NO"} | Procesar hoja historica aparte: NO (solo DIAGNOSTICOS)`);
+    Logger.log(
+      `[DASH7] Historico embebido en ${SHEETS.DIAG_DJANGO}: ${hasHistInsideDjango ? "SI" : "NO"} | Procesar hoja historica aparte: NO (solo ${SHEETS.DIAG_DJANGO})`
+    );
     Logger.log(`[DASH7] Ano fallback Django: ${djangoFallbackYear} | Ano fallback Historico: ${histFallbackYear}`);
 
     function yearOrDefault(fechaRaw, fuente, fallbackYear) {
@@ -444,46 +462,61 @@
       return fallbackYear || NO_DATE_YEAR;
     }
 
-    function resolveEmpresa(name, rowForAltId, rowHeaderIndex) {
-      const norm = normalizeName(name);
-      const mappedKey = aliasToRuc.get(norm);
-      if (mappedKey) {
-        const infoMapped = baseMap.get(mappedKey) || missingEmpresas.get(mappedKey);
-        if (infoMapped) return infoMapped;
+  function resolveEmpresa(name, rowForAltId, rowHeaderIndex, preferRawForLegal = false) {
+    const norm = normalizeName(name);
+    // En modo LEGAL priorizamos RUC/ALT, pero luego usamos las mismas concordancias por nombre/alias
+    if (preferRawForLegal && rowForAltId && rowHeaderIndex) {
+      const rawRuc = padRuc13(getVal(rowForAltId, rowHeaderIndex, ["RUC"]));
+      if (rawRuc) {
+        const byRuc = baseMap.get(rawRuc);
+        if (byRuc) return byRuc;
       }
-
-      const infoByName = baseMap.get(norm);
-      if (infoByName) {
-        aliasToRuc.set(norm, infoByName.baseKey);
-        return infoByName;
+      const rawAlt = normalizeKey(getVal(rowForAltId, rowHeaderIndex, ALT_ID_ALIASES));
+      if (rawAlt) {
+        const byAlt = baseMap.get(rawAlt) || altIdToBase.get(rawAlt);
+        if (byAlt) return byAlt;
       }
+      // si no hay RUC/ALT, continuamos al flujo normal (alias/nombre) antes de crear placeholder
+    }
 
-      if (rowForAltId) {
-        const altId = normalizeKey(getVal(rowForAltId, rowHeaderIndex || {}, ALT_ID_ALIASES));
-        if (altId) {
-          const infoAlt = altIdToBase.get(altId);
-          if (infoAlt) {
-            aliasToRuc.set(norm, infoAlt.baseKey);
-            return infoAlt;
-          }
+    const mappedKey = aliasToRuc.get(norm);
+    if (mappedKey) {
+      const infoMapped = baseMap.get(mappedKey) || missingEmpresas.get(mappedKey);
+      if (infoMapped) return infoMapped;
+    }
+
+    const infoByName = baseMap.get(norm);
+    if (infoByName) {
+      aliasToRuc.set(norm, infoByName.baseKey);
+      return infoByName;
+    }
+
+    if (rowForAltId) {
+      const altId = normalizeKey(getVal(rowForAltId, rowHeaderIndex || {}, ALT_ID_ALIASES));
+      if (altId) {
+        const infoAlt = altIdToBase.get(altId);
+        if (infoAlt) {
+          aliasToRuc.set(norm, infoAlt.baseKey);
+          return infoAlt;
         }
       }
-
-      const placeholder = {
-        baseKey: norm,
-        ruc: "",
-        altId: "",
-        razonSocial: norm || "SIN_NOMBRE",
-        tamano: "SIN_TAMANO",
-        sector: "SIN CLASIFICAR",
-        isPlaceholder: true,
-      };
-      if (norm) {
-        missingEmpresas.set(norm, placeholder);
-        aliasToRuc.set(norm, placeholder.baseKey);
-      }
-      return placeholder;
     }
+
+    const placeholder = {
+      baseKey: norm,
+      ruc: "",
+      altId: "",
+      razonSocial: norm || "SIN_NOMBRE",
+      tamano: "SIN_TAMANO",
+      sector: "SIN CLASIFICAR",
+      isPlaceholder: true,
+    };
+    if (norm) {
+      missingEmpresas.set(norm, placeholder);
+      aliasToRuc.set(norm, placeholder.baseKey);
+    }
+    return placeholder;
+  }
 
     function addAsesoriaAggregated(empresa, count, fechaRaw, fuente, fallbackYear, subtipoRaw) {
       let subtipo = normalizeSubtipoLegal(subtipoRaw);
@@ -522,24 +555,164 @@
       return { added, merged: count - added > 0 ? count - added : 0 };
     }
 
-    function markEmpresaDenominador(empresa, row, headerIndex, hasUsefulData) {
-      if (!empresa || empresa.isPlaceholder || !hasUsefulData) return false;
+    function addAsesoriaAggregatedFromSubtipos(empresa, subtiposMap, totalRaw, fechaRaw, fuente, fallbackYear) {
+      const totalSub = Array.from(subtiposMap.values()).reduce((acc, v) => acc + (v || 0), 0);
+      let total = parseCountNumber(totalRaw);
+      if (total <= 0) total = totalSub;
+      if (total <= 0 && totalSub <= 0) return { added: 0, merged: 0 };
+
+      const anio = yearOrDefault(fechaRaw, fuente, fallbackYear);
+      const entityKey = empresa.baseKey || empresa.ruc || empresa.razonSocial;
+      const key = `${entityKey}|${anio}`;
+      let bucket = asesoriasBuckets.get(key);
+      const prevTotal = bucket ? bucket.total || 0 : 0;
+      if (!bucket) {
+        bucket = {
+          ruc: empresa.ruc,
+          razonSocial: empresa.razonSocial,
+          tamano: empresa.tamano,
+          sector: empresa.sector,
+          anio,
+          trimestre: getTrimestre(fechaRaw),
+          fuente,
+          total: 0,
+          subtipos: new Map(),
+        };
+        asesoriasBuckets.set(key, bucket);
+        years.add(anio);
+      } else {
+        if (!bucket.trimestre) bucket.trimestre = getTrimestre(fechaRaw);
+        if (!bucket.fuente && fuente) bucket.fuente = fuente;
+      }
+
+      const newTotal = Math.max(bucket.total || 0, total);
+      const added = Math.max(0, newTotal - (bucket.total || 0));
+      bucket.total = newTotal;
+
+      subtiposMap.forEach((cnt, subtipoRaw) => {
+        const subtipo = normalizeSubtipoLegal(subtipoRaw);
+        if (!subtipo || subtipo === "SIN SUBTIPO") return;
+        const prevSub = bucket.subtipos.get(subtipo) || 0;
+        bucket.subtipos.set(subtipo, Math.max(prevSub, cnt || 0));
+      });
+
+      return { added, merged: total - added > 0 ? total - added : 0 };
+    }
+
+    function markEmpresaDenominador(empresa, row, headerIndex, hasUsefulData, collectLegalDenom = false) {
+      if (!empresa || !hasUsefulData) return false;
       const entityKey = empresa.baseKey || empresa.ruc || empresa.razonSocial;
       const tamAsignado = empresaTamAsignado.get(entityKey) || empresa.tamano || "SIN_TAMANO";
       if (!empresaTamAsignado.has(entityKey)) empresaTamAsignado.set(entityKey, tamAsignado);
       const tamKey = tamAsignado || "SIN_TAMANO";
-      if (!empresasBaseAsePorTam.has(tamKey)) empresasBaseAsePorTam.set(tamKey, new Set());
-      empresasBaseAsePorTam.get(tamKey).add(entityKey);
+      if (collectLegalDenom) {
+        if (!empresasLegalDenomPorTam.has(tamKey)) empresasLegalDenomPorTam.set(tamKey, new Set());
+        empresasLegalDenomPorTam.get(tamKey).add(entityKey);
+      }
+      if (!empresa.isPlaceholder) {
+        if (!empresasBaseAsePorTam.has(tamKey)) empresasBaseAsePorTam.set(tamKey, new Set());
+        empresasBaseAsePorTam.get(tamKey).add(entityKey);
+      }
 
-      const rawRuc = padRuc13(getVal(row, headerIndex, ["RUC"]));
-      const rawAlt = normalizeKey(getVal(row, headerIndex, ALT_ID_ALIASES));
-      const rawName = normalizeName(getVal(row, headerIndex, ["RAZON_SOCIAL", "RAZON SOCIAL", "EMPRESA", "Razon Social"]));
+      let rawRuc = "";
+      let rawAlt = "";
+      let rawName = "";
+      if (row) {
+        rawRuc = padRuc13(getVal(row, headerIndex, ["RUC"]));
+        rawAlt = normalizeKey(getVal(row, headerIndex, ALT_ID_ALIASES));
+        rawName = normalizeName(getVal(row, headerIndex, ["RAZON_SOCIAL", "RAZON SOCIAL", "EMPRESA", "Razon Social"]));
+      } else {
+        rawRuc = padRuc13(empresa.ruc || "");
+        rawName = normalizeName(empresa.razonSocial || "");
+      }
       const rawKey = rawRuc || rawAlt || rawName;
-      if (rawKey) {
+      // Normalizamos el identificador crudo para evitar duplicados por variaciones de escritura.
+      const keyForRaw = normalizeName(rawKey || entityKey);
+      if (keyForRaw) {
         if (!empresasRawAsePorTam.has(tamKey)) empresasRawAsePorTam.set(tamKey, new Set());
-        empresasRawAsePorTam.get(tamKey).add(rawKey);
+        empresasRawAsePorTam.get(tamKey).add(keyForRaw);
       }
       return true;
+    }
+
+    if (useLegalSheetsOnly && legalSources.length) {
+      Logger.log(`[DASH7] Usando hojas legales: fuentes=${legalSources.length}`);
+      const legalMerged = new Map(); // key: empresa -> maxima data combinando todas las hojas legales
+
+      legalSources.forEach((table) => {
+        Logger.log(`[DASH7] Procesando hoja legal ${table.name || "LEGAL_UNIFICADO"}: ${table.rows.length} filas`);
+        table.rows.forEach((row) => {
+          let razonRaw = getVal(row, table.headerIndex, ["RAZON_SOCIAL", "RAZON SOCIAL", "EMPRESA"]);
+          if (!razonRaw) razonRaw = "SIN_NOMBRE_LEGAL";
+          const empresa = resolveEmpresa(razonRaw, row, table.headerIndex, true);
+          if (!empresa) {
+            noFound++;
+            return;
+          }
+          if (empresa.isPlaceholder) {
+            const tamLegal = normalizeTamano(getVal(row, table.headerIndex, LEGAL_TAMANO_ALIASES));
+            if (tamLegal) empresa.tamano = tamLegal;
+          }
+          const subtiposMap = new Map();
+          subtiposMap.set("LABORAL", parseCountNumber(getVal(row, table.headerIndex, ["LABORAL"])) || 0);
+          subtiposMap.set("SOCIETARIO", parseCountNumber(getVal(row, table.headerIndex, ["SOCIETARIO"])) || 0);
+          subtiposMap.set("PROPIEDAD INTELECTUAL", parseCountNumber(getVal(row, table.headerIndex, LEGAL_PROP_INT_ALIASES)) || 0);
+          subtiposMap.set("OTROS", parseCountNumber(getVal(row, table.headerIndex, ["OTROS"])) || 0);
+          const totalRaw = getVal(row, table.headerIndex, TOTAL_ASESORIAS_ALIASES);
+          const servicioRaw = getVal(row, table.headerIndex, [...SERVICIO_LEGAL_ALIASES, "SERVICIO"]);
+          const diagFlagRaw = getVal(row, table.headerIndex, ["DIAGNOSTICO", "DIAGNÓSTICO"]);
+          let servicioNorm = (servicioRaw || "").toString().trim().toUpperCase();
+          const diagFlagNorm = (diagFlagRaw || "").toString().trim().toUpperCase();
+          if (!servicioNorm && diagFlagNorm) servicioNorm = diagFlagNorm;
+          const totalNumRaw = parseCountNumber(totalRaw);
+          const sumSubtipos = Array.from(subtiposMap.values()).reduce((acc, v) => acc + (v || 0), 0);
+          const totalNum = totalNumRaw > 0 ? totalNumRaw : sumSubtipos;
+          const hasAnyLegalData = (servicioNorm && servicioNorm.length) || totalNum > 0 || sumSubtipos > 0;
+          if (!hasAnyLegalData) return;
+          // Denominador
+          markEmpresaDenominador(empresa, row, table.headerIndex, true, true);
+          // Numerador: consolidar por empresa tomando max por subtipo y total para evitar duplicados entre hojas
+          if (servicioNorm && servicioNorm.startsWith("NO")) return;
+          if (!servicioNorm && totalNum > 0) servicioNorm = "SI";
+          if (servicioNorm && (servicioNorm.startsWith("NO") || servicioNorm === "0")) return;
+          if (servicioNorm && servicioNorm !== "SI") return;
+          if (totalNum <= 0 && sumSubtipos <= 0) return;
+          const fechaRaw = getVal(row, table.headerIndex, ["FECHA", "ANIO", "ANIO_SERVICIO", "ANO"]);
+          const key = empresa.baseKey || empresa.ruc || empresa.razonSocial;
+          if (!key) return;
+          if (!legalMerged.has(key)) {
+            legalMerged.set(key, {
+              empresa,
+              subtipos: new Map(),
+              total: 0,
+              fecha: fechaRaw,
+            });
+          }
+          const target = legalMerged.get(key);
+          target.total = Math.max(target.total || 0, totalNum);
+          subtiposMap.forEach((cnt, st) => {
+            const prev = target.subtipos.get(st) || 0;
+            target.subtipos.set(st, Math.max(prev, cnt || 0));
+          });
+          if (!target.fecha && fechaRaw) target.fecha = fechaRaw;
+        });
+      });
+
+      legalMerged.forEach((entry) => {
+        const res = addAsesoriaAggregatedFromSubtipos(
+          entry.empresa,
+          entry.subtipos,
+          entry.total,
+          entry.fecha,
+          legalSources[0].name || "LEGAL_UNIFICADO",
+          DEFAULT_HIST_YEAR
+        );
+        registrosProcesados += res.added;
+        bucketRowsMerged += res.merged;
+        legalRowsProcessed += res.added;
+        const hasData = res.added > 0 || Array.from(entry.subtipos.values()).some((v) => v > 0);
+        if (hasData) markEmpresaDenominador(entry.empresa, null, {}, true);
+      });
     }
 
     if (!useLegalSheetsOnly) {
@@ -568,7 +741,16 @@
         .trim()
         .toUpperCase();
 
-      const tipoRaw = normalizeTipoDiagnostico(getVal(row, diagDjango.headerIndex, ["TIPO_DE_DIAGNOSTICO", "TIPO", "TIPO DIAGNOSTICO", "TIPO DE DIAGNOSTICO"]));
+      const tipoRaw = normalizeTipoDiagnostico(
+        getVal(row, diagDjango.headerIndex, [
+          "TIPO_DE_DIAGNOSTICO",
+          "TIPO_DE_ASESORIA",
+          "TIPO",
+          "TIPO DIAGNOSTICO",
+          "TIPO DE DIAGNOSTICO",
+          "TIPO DE ASESORIA",
+        ])
+      );
       if (tipoRaw !== "LEGAL") {
         if (tipoRaw === "NINGUNO") filtNinguno++;
         return;
@@ -686,7 +868,15 @@
     const yearsList = Array.from(years).sort((a, b) => yearRank(b) - yearRank(a));
     Logger.log(`Anios detectados: ${yearsList.join(", ")}`);
 
-    generateAsesoriasResumenTable(baseMap, asesorias, yearsList, empresasBaseAsePorTam, empresasRawAsePorTam);
+    generateAsesoriasResumenTable(
+      baseMap,
+      asesorias,
+      yearsList,
+      empresasBaseAsePorTam,
+      empresasRawAsePorTam,
+      useLegalSheetsOnly,
+      empresasLegalDenomPorTam
+    );
     generateAsesoriasSubtipoTable(asesorias, yearsList);
     generateAsesoriasPorEmpresaTable(asesorias, yearsList);
     generateSlicerMasterSheet();
@@ -702,21 +892,33 @@
     return -3;
   }
 
-  function generateAsesoriasResumenTable(baseMap, asesorias, years, baseAseMap, rawAseMap) {
+  function generateAsesoriasResumenTable(baseMap, asesorias, years, baseAseMap, rawAseMap, preferRawDenom = false, legalDenomMap = null) {
     const rows = [];
     const header = ["ANIO", "TAMANO", "TOTAL_ASESORIAS", "EMPRESAS_CON_ASE", "EMPRESAS_SIN_ASE", "EMPRESAS_TOTALES"];
     const empresasPorTam = new Map();
-    const sourceMap = rawAseMap && rawAseMap.size ? rawAseMap : baseAseMap && baseAseMap.size ? baseAseMap : null;
-    if (sourceMap) {
-      sourceMap.forEach((set, tam) => {
-        if (!empresasPorTam.has(tam)) empresasPorTam.set(tam, new Set());
-        set.forEach((val) => empresasPorTam.get(tam).add(val));
-      });
+    // Si preferRawDenom (modo LEGAL), usar el mapa deduplicado (baseAseMap) y caer a rawAseMap solo si falta.
+    let sourceMap = null;
+    if (preferRawDenom) {
+      if (legalDenomMap && legalDenomMap.size) {
+        sourceMap = legalDenomMap;
+      } else if (baseAseMap && baseAseMap.size) {
+        sourceMap = baseAseMap;
+      } else if (rawAseMap && rawAseMap.size) {
+        sourceMap = rawAseMap;
+      }
     } else {
+      sourceMap = baseMap && baseMap.size ? null : rawAseMap && rawAseMap.size ? rawAseMap : baseAseMap && baseAseMap.size ? baseAseMap : null;
+    }
+    if (!sourceMap) {
       baseMap.forEach((info) => {
         const tam = info.tamano || "SIN_TAMANO";
         if (!empresasPorTam.has(tam)) empresasPorTam.set(tam, new Set());
         empresasPorTam.get(tam).add(info.baseKey || info.ruc || info.razonSocial);
+      });
+    } else {
+      sourceMap.forEach((set, tam) => {
+        if (!empresasPorTam.has(tam)) empresasPorTam.set(tam, new Set());
+        set.forEach((val) => empresasPorTam.get(tam).add(val));
       });
     }
     const tamanos = ["MICRO", "PEQUENA", "MEDIANA", "GRANDE", "SIN_TAMANO"];

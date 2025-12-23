@@ -7,8 +7,8 @@
   const SHEETS = {
     BASE: "SOCIOS",
     BASE_FALLBACK: "BASE DE DATOS",
-    DIAG_DJANGO: "DIAGNOSTICOS",
-    DIAG_DJANGO_FALLBACK: "DIAGNOSTICO_FINAL",
+    DIAG_DJANGO: "ASESORIAS",
+    DIAG_DJANGO_FALLBACK: "DIAGNOSTICOS",
     DIAG_HIST: "DIAGNOSTICOS_HISTORICOS",
     OUT_RESUMEN: "PIVOT_DIAGNOSTICOS_RESUMEN_ANIO",
     OUT_TIPO: "PIVOT_DIAGNOSTICOS_TIPO_ANIO",
@@ -306,7 +306,12 @@
     Logger.log("[DASH6] Iniciando generacion...");
 
     const base = readTableFlexibleByCandidates([SHEETS.BASE, SHEETS.BASE_FALLBACK]);
-    const diagDjango = readTableFlexibleByCandidates([SHEETS.DIAG_DJANGO, SHEETS.DIAG_DJANGO_FALLBACK]);
+    const diagDjango = readTableFlexibleByCandidates([
+      SHEETS.DIAG_DJANGO,
+      SHEETS.DIAG_DJANGO_FALLBACK,
+      "DIAGNOSTICO_FINAL",
+      "DIAGNOSTICO",
+    ]);
     const diagHist = readTableFlexibleByCandidates([SHEETS.DIAG_HIST, getSheetNameFlexible("DIAGNOSTICO")]);
 
     Logger.log(`[DASH6] Procesando hoja de diagnosticos unificada: ${diagDjango.rows.length} filas`);
@@ -479,12 +484,32 @@
         .toString()
         .trim()
         .toUpperCase();
-      const tipoRaw = normalizeTipoDiagnostico(getVal(row, diagDjango.headerIndex, ["TIPO_DE_DIAGNOSTICO", "TIPO", "TIPO DIAGNOSTICO", "TIPO DE DIAGNOSTICO"]));
+      const tipoRaw = normalizeTipoDiagnostico(
+        getVal(row, diagDjango.headerIndex, [
+          "TIPO_DE_DIAGNOSTICO",
+          "TIPO_DE_ASESORIA",
+          "TIPO",
+          "TIPO DIAGNOSTICO",
+          "TIPO DE DIAGNOSTICO",
+          "TIPO DE ASESORIA",
+        ])
+      );
       if (tipoRaw === "NINGUNO") {
         filtNinguno++;
       }
       const subtipoRaw = normalizeSubtipoDiagnostico(
-        getVal(row, diagDjango.headerIndex, ["SUBTIPO_DIAGNOSTICO", "SUBTIPO_DE_DIAGNOSTICO", "SUBTIPO", "SUBTIPO DIAGNOSTICO", "SUBTIPO DE DIAGNOSTICO", "OTROS_SUBTIPO", "OTROS SUBTIPO"])
+        getVal(row, diagDjango.headerIndex, [
+          "SUBTIPO_DIAGNOSTICO",
+          "SUBTIPO_DE_DIAGNOSTICO",
+          "SUBTIPO",
+          "SUBTIPO DIAGNOSTICO",
+          "SUBTIPO DE DIAGNOSTICO",
+          "SUBTIPO_DE_ASESORIA",
+          "SUBTIPO DE ASESORIA",
+          "SUBTIPO ASESORIA",
+          "OTROS_SUBTIPO",
+          "OTROS SUBTIPO",
+        ])
       );
       const tiposDet = collectTiposFromRow(row, diagDjango.headerIndex, tipoRaw);
       const hasUsefulData = !!seDiagRaw || tiposDet.length > 0;

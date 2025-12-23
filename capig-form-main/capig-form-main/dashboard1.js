@@ -98,6 +98,7 @@ const FIELD_ALIASES = {
     "VENTAS_ANUALES",
     "VENTAS_MONT_EST",
     "MONTO_ESTIMADO",
+    "MONTO_VENTAS",
     "VALOR TOTAL",
     "MONTO",
     "VALOR_APORTE",

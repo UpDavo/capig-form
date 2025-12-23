@@ -1,4 +1,4 @@
-from django.shortcuts import render, redirect
+Ôªøfrom django.shortcuts import render, redirect
 from django.contrib import messages
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.http import require_GET
@@ -6,6 +6,7 @@ from django.conf import settings
 from django.utils.timezone import now
 from datetime import datetime
 import pytz
+import json
 import re
 
 from capig_form.services.google_sheets_service import (
@@ -15,7 +16,13 @@ from capig_form.services.google_sheets_service import (
     insert_row_to_sheet,
 )
 from forms.afiliacion_handler import guardar_nuevo_afiliado_en_google_sheets
-from forms.utils import buscar_afiliado_por_ruc, actualizar_estado_afiliado, buscar_afiliado_por_ruc_base_datos, guardar_ventas_afiliado
+from forms.utils import (
+    buscar_afiliado_por_ruc,
+    actualizar_estado_afiliado,
+    buscar_afiliado_por_ruc_base_datos,
+    guardar_ventas_afiliado,
+    obtener_ventas_por_ruc,
+)
 
 VENTA_KEY_PATTERN = re.compile(r"ventas\[(\d+)\]\[(\w+)\]")
 
@@ -67,7 +74,7 @@ def _obtener_sectores():
 
 
 def _codigo_seguridad_valido(request):
-    """Valida el cÛdigo de seguridad de 6 dÌgitos enviado en el POST."""
+    """Valida el c√≥digo de seguridad de 6 d√≠gitos enviado en el POST."""
     codigo = (request.POST.get("security_code") or "").strip()
     return codigo and codigo == getattr(settings, "SECURITY_CODE", "")
 
@@ -90,10 +97,10 @@ def _to_iso_date(fecha_str: str) -> str:
 
 @require_http_methods(["GET", "POST"])
 def diag_form_view(request):
-    """Vista para el formulario de diagnÛstico"""
+    """Vista para el formulario de diagn√≥stico"""
     if request.method == "POST":
         # Nombre de hoja actualizado
-        SHEET_NAME = 'DIAGNOSTICOS'
+        SHEET_NAME = 'ASESORIAS'
 
         razon_social = request.POST.get('razon_social')
         tipo_diagnostico = request.POST.get('tipo_diagnostico')
@@ -106,12 +113,12 @@ def diag_form_view(request):
         fecha_str = now_ecuador.strftime('%Y-%m-%d')
         hora_str = now_ecuador.strftime('%H:%M:%S')
 
-        print("\n=== FORMULARIO DE DIAGN”STICO ===")
-        print(f"RazÛn Social: {razon_social}")
-        print(f"Tipo de DiagnÛstico: {tipo_diagnostico}")
-        print(f"Subtipo de DiagnÛstico: {subtipo_diagnostico}")
+        print("\n=== FORMULARIO DE ASESOR√çAS ===")
+        print(f"Raz√≥n Social: {razon_social}")
+        print(f"Tipo de Asesor√≠a: {tipo_diagnostico}")
+        print(f"Subtipo de Asesor√≠a: {subtipo_diagnostico}")
         print(f"Otros Subtipo: {otros_subtipo}")
-        print(f"Se DiagnosticÛ: {se_diagnostico}")
+        print(f"Se realiz√≥ la asesor√≠a: {se_diagnostico}")
         print(f"Fecha: {fecha_str}")
         print(f"Hora: {hora_str}")
         print("================================\n")
@@ -121,7 +128,7 @@ def diag_form_view(request):
             tipo_diagnostico,
             subtipo_diagnostico,
             otros_subtipo,
-            'SÌ' if se_diagnostico else 'No',
+            'S√≠' if se_diagnostico else 'No',
             fecha_str,
             hora_str,
         ])
@@ -138,10 +145,10 @@ def diag_form_view(request):
     if not empresas:
         empresas = [
             'Empresa Ejemplo S.A.',
-            'CorporaciÛn ABC Ltda.',
+            'Corporaci√≥n ABC Ltda.',
             'Inversiones XYZ S.A.S.',
             'Grupo Empresarial 123',
-            'Soluciones TecnolÛgicas DEF'
+            'Soluciones Tecnol√≥gicas DEF'
         ]
 
     return render(request, 'diag_form.html', {'empresas': empresas})
@@ -149,7 +156,7 @@ def diag_form_view(request):
 
 @require_http_methods(["GET", "POST"])
 def cap_form_view(request):
-    """Vista para el formulario de capacitaciÛn"""
+    """Vista para el formulario de capacitaci√≥n"""
     if request.method == "POST":
         SHEET_NAME = 'CAPACITACIONES'
 
@@ -163,10 +170,10 @@ def cap_form_view(request):
         fecha_str = now_ecuador.strftime('%Y-%m-%d')
         hora_str = now_ecuador.strftime('%H:%M:%S')
 
-        print("\n=== FORMULARIO DE CAPACITACI”N ===")
-        print(f"RazÛn Social: {razon_social}")
-        print(f"Nombre de la CapacitaciÛn: {nombre_capacitacion}")
-        print(f"Tipo de CapacitaciÛn: {tipo_capacitacion}")
+        print("\n=== FORMULARIO DE CAPACITACI√ìN ===")
+        print(f"Raz√≥n Social: {razon_social}")
+        print(f"Nombre de la Capacitaci√≥n: {nombre_capacitacion}")
+        print(f"Tipo de Capacitaci√≥n: {tipo_capacitacion}")
         print(f"Valor del Pago: ${valor_pago}")
         print(f"Fecha: {fecha_str}")
         print(f"Hora: {hora_str}")
@@ -193,10 +200,10 @@ def cap_form_view(request):
     if not empresas:
         empresas = [
             'Empresa Ejemplo S.A.',
-            'CorporaciÛn ABC Ltda.',
+            'Corporaci√≥n ABC Ltda.',
             'Inversiones XYZ S.A.S.',
             'Grupo Empresarial 123',
-            'Soluciones TecnolÛgicas DEF'
+            'Soluciones Tecnol√≥gicas DEF'
         ]
 
     return render(request, 'cap_form.html', {'empresas': empresas})
@@ -241,7 +248,7 @@ def estado_afiliado_view(request):
         if afiliado:
             if nuevo_estado:
                 if not _codigo_seguridad_valido(request):
-                    messages.error(request, "CÛdigo de seguridad inv·lido.")
+                    messages.error(request, "C√≥digo de seguridad inv√°lido.")
                     context["afiliado"] = afiliado
                     return render(request, "estado_afiliado.html", context)
                 actualizar_estado_afiliado(ruc, nuevo_estado)
@@ -255,7 +262,7 @@ def estado_afiliado_view(request):
 
 @require_GET
 def success_estado_afiliado_view(request):
-    """ConfirmaciÛn de actualizaciÛn de estado."""
+    """Confirmaci√≥n de actualizaci√≥n de estado."""
     return render(request, "success_estado_afiliado.html")
 
 @require_http_methods(["GET", "POST"])
@@ -265,7 +272,7 @@ def nuevo_afiliado_view(request):
 
     if request.method == "POST":
         if not _codigo_seguridad_valido(request):
-            messages.error(request, "CÛdigo de seguridad inv·lido.")
+            messages.error(request, "C√≥digo de seguridad inv√°lido.")
             return render(request, "afiliado_form.html", {"sectores": sectores})
 
         razon_social = request.POST.get("razon_social", "").strip()
@@ -324,6 +331,9 @@ def ventas_afiliado_view(request):
         "ruc": request.POST.get("ruc", "").strip(),
         "registro_ventas": request.POST.get("registro_ventas", "").strip(),
         "observaciones": request.POST.get("observaciones", "").strip(),
+        "ventas_previas": [],
+        "ventas_previas_years": [],
+        "ventas_previas_json": "[]",
     }
 
     if request.method == "POST":
@@ -335,11 +345,19 @@ def ventas_afiliado_view(request):
         afiliado = buscar_afiliado_por_ruc_base_datos(ruc)
 
         if afiliado:
+            ventas_previas = obtener_ventas_por_ruc(ruc)
+            years_previas = sorted(
+                {v["anio"] for v in ventas_previas if v.get("anio")},
+                reverse=True,
+            )
             context["afiliado"] = afiliado
             context["ruc"] = ruc
             context["registro_ventas"] = registro_ventas
             context["ventas_data"] = ventas_bloques or [_entrada_venta_vacia()]
             context["observaciones"] = observaciones
+            context["ventas_previas"] = ventas_previas
+            context["ventas_previas_years"] = years_previas
+            context["ventas_previas_json"] = json.dumps(ventas_previas, ensure_ascii=False)
 
             # Fase 1: solo se busco por RUC, aun no se responde el formulario
             if not registro_ventas:
@@ -351,7 +369,7 @@ def ventas_afiliado_view(request):
                 return render(request, "ventas_afiliado.html", context)
 
             rv_norm = (registro_ventas or "").strip().lower()
-            es_si = rv_norm in {"si", "sÌ", "s\u00ed", "s"}
+            es_si = rv_norm in {"si", "s√≠", "s\u00ed", "s"}
 
             base_data = {
                 "ruc": ruc,

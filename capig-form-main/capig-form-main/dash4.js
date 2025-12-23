@@ -498,7 +498,7 @@
             }
             const trimestre = getTrimestre(fechaRegistro);
 
-            const rawMonto = getVal(row, ventas.headerIndex, ["MONTO_ESTIMADO", "MONTO", "VALOR", "VENTAS", "PRECIO"]);
+            const rawMonto = getVal(row, ventas.headerIndex, ["MONTO_ESTIMADO", "MONTO_VENTAS", "MONTO", "VALOR", "VENTAS", "PRECIO"]);
             const monto = parseMonto(rawMonto);
 
             const razonSocialVenta = normalizeName(getVal(row, ventas.headerIndex, ["RAZON_SOCIAL", "EMPRESA", "NOMBRE"]));

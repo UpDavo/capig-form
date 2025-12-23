@@ -1,11 +1,13 @@
 import os
 import logging
+import re
 from datetime import datetime
 from typing import Dict
 
 from django.conf import settings
 
 from capig_form.services.google_sheets_service import get_google_sheet
+from gspread.exceptions import GSpreadException
 
 # Encabezados mínimos usados en la hoja SOCIOS
 EXPECTED_BASE_HEADERS = [
@@ -37,6 +39,19 @@ def _get_base_datos_sheet():
     return get_google_sheet(sheet_id, "SOCIOS")
 
 
+def _get_all_records_flexible(sheet, head=2):
+    """
+    Lee registros intentando con el head indicado y, si falla (sheet vacío
+    o encabezados cambiados), vuelve a head=1. Devuelve lista vacía si nada funciona.
+    """
+    for h in (head, 1):
+        try:
+            return sheet.get_all_records(head=h)
+        except Exception:
+            continue
+    return []
+
+
 def buscar_afiliado_por_ruc(ruc):
     """
     Busca primero en ESTADO_SOCIO; si falta info, completa desde SOCIOS.
@@ -44,7 +59,7 @@ def buscar_afiliado_por_ruc(ruc):
     ruc = limpiar_ruc(ruc)
 
     estado_sheet = _get_estado_sheet()
-    estado_rows = estado_sheet.get_all_records()
+    estado_rows = _get_all_records_flexible(estado_sheet, head=1)
 
     afiliado = next(
         (row for row in estado_rows if limpiar_ruc(row.get("RUC", "")) == ruc),
@@ -62,7 +77,7 @@ def buscar_afiliado_por_ruc(ruc):
         }
 
     base_sheet = _get_base_datos_sheet()
-    base_rows = base_sheet.get_all_records(head=2, expected_headers=EXPECTED_BASE_HEADERS)
+    base_rows = _get_all_records_flexible(base_sheet, head=2)
 
     base_row = next(
         (row for row in base_rows if limpiar_ruc(row.get("RUC", "")) == ruc),
@@ -119,7 +134,7 @@ def actualizar_estado_afiliado(ruc, nuevo_estado):
     # Si no se encontro el RUC, agregar nueva fila con datos base y estado actualizado
     if not encontrado:
         base_sheet = _get_base_datos_sheet()
-        base_rows = base_sheet.get_all_records(head=2, expected_headers=EXPECTED_BASE_HEADERS)
+        base_rows = _get_all_records_flexible(base_sheet, head=2)
         base_row = next(
             (row for row in base_rows if limpiar_ruc(row.get("RUC", "")) == limpiar_ruc(ruc)),
             {},
@@ -141,7 +156,7 @@ def buscar_afiliado_por_ruc_base_datos(ruc):
     """Busca un afiliado únicamente en la hoja SOCIOS."""
     ruc = limpiar_ruc(ruc)
     sheet = _get_base_datos_sheet()
-    rows = sheet.get_all_records(head=2, expected_headers=EXPECTED_BASE_HEADERS)
+    rows = _get_all_records_flexible(sheet, head=2)
     for row in rows:
         if limpiar_ruc(row.get("RUC", "")) == ruc:
             return {
@@ -150,6 +165,85 @@ def buscar_afiliado_por_ruc_base_datos(ruc):
                 "fecha_afiliacion": row.get("FECHA_AFILIACION", ""),
             }
     return None
+
+
+def obtener_ventas_por_ruc(ruc):
+    """Obtiene ventas históricas del afiliado desde VENTAS_SOCIO y, si no hay, desde columnas por año en SOCIOS."""
+    ruc_norm = limpiar_ruc(ruc)
+    if not ruc_norm:
+        return []
+
+    sheet_id = os.getenv("SHEET_PATH") or getattr(settings, "SHEET_PATH", "")
+    if not sheet_id:
+        return []
+
+    try:
+        sheet = get_google_sheet(sheet_id, "VENTAS_SOCIO")
+    except Exception:
+        return []
+
+    rows = _get_all_records_flexible(sheet, head=2)
+    ventas = []
+    for row in rows:
+        if limpiar_ruc(row.get("RUC", "")) != ruc_norm:
+            continue
+        anio = str(row.get("ANIO") or row.get("AÑO") or row.get("ANO") or "").strip()
+        comparativo = row.get("COMPARATIVO", "")
+        ventas_estimadas = (
+            row.get("VENTAS_ESTIMADAS")
+            or row.get("MONTO_ESTIMADO")
+            or row.get("MONTO_VENTAS")
+            or row.get("VENTAS_ESTIMADA")
+            or ""
+        )
+        fecha_registro = row.get("FECHA_REGISTRO", "") or row.get("FECHA", "")
+        ventas.append(
+            {
+                "anio": anio,
+                "comparativo": comparativo,
+                "ventas_estimadas": ventas_estimadas,
+                "fecha_registro": fecha_registro,
+            }
+        )
+
+    # Fallback: buscar columnas por año (ej. 2019, 2020) en la hoja SOCIOS
+    try:
+        base_sheet = get_google_sheet(sheet_id, "SOCIOS")
+        base_rows = _get_all_records_flexible(base_sheet, head=2)
+    except Exception:
+        base_rows = []
+
+    if base_rows:
+        try:
+            base_row = next(
+                (row for row in base_rows if limpiar_ruc(row.get("RUC", "")) == ruc_norm),
+                None,
+            )
+        except Exception:
+            base_row = None
+        if base_row:
+            existing_years = {v.get("anio") for v in ventas if v.get("anio")}
+            for key, value in base_row.items():
+                key_str = (key or "").strip()
+                if not key_str or not re.fullmatch(r"\d{4}", key_str):
+                    continue
+                if key_str in existing_years:
+                    continue
+                val_str = (value or "").strip() if isinstance(value, str) else value
+                if val_str in ("", None):
+                    continue
+                ventas.append(
+                    {
+                        "anio": key_str,
+                        "comparativo": "",
+                        "ventas_estimadas": val_str,
+                        "fecha_registro": "",
+                    }
+                )
+
+    # Ordenar desc por año si es numérico
+    ventas.sort(key=lambda v: v.get("anio") or "", reverse=True)
+    return ventas
 
 
 def guardar_ventas_afiliado(data: Dict[str, str]):
