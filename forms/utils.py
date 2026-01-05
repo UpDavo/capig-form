@@ -5,8 +5,12 @@ from datetime import datetime
 from typing import Dict
 
 from django.conf import settings
+from gspread.utils import rowcol_to_a1
 
-from capig_form.services.google_sheets_service import get_google_sheet
+from capig_form.services.google_sheets_service import (
+    get_google_sheet,
+    find_first_empty_row,
+)
 
 # Encabezados mínimos usados en la hoja SOCIOS
 EXPECTED_BASE_HEADERS = [
@@ -18,8 +22,14 @@ EXPECTED_BASE_HEADERS = [
 
 
 def limpiar_ruc(valor):
-    """Normaliza el RUC removiendo comillas y espacios."""
-    return str(valor).replace("'", "").replace('"', "").strip()
+    """Normaliza el RUC removiendo comillas, espacios y NBSP."""
+    return (
+        str(valor)
+        .replace("'", "")
+        .replace('"', "")
+        .replace("\u00a0", " ")
+        .strip()
+    )
 
 
 def _get_estado_sheet():
@@ -45,7 +55,11 @@ def _get_all_records_flexible(sheet, head=2):
     """
     for h in (head, 1):
         try:
-            return sheet.get_all_records(head=h)
+            return sheet.get_all_records(
+                head=h,
+                value_render_option="UNFORMATTED_VALUE",
+                numericise_ignore=["all"],
+            )
         except Exception:
             continue
     return []
@@ -104,7 +118,10 @@ def buscar_afiliado_por_ruc(ruc):
 
 def actualizar_estado_afiliado(ruc, nuevo_estado):
     sheet = _get_estado_sheet()
-    data = sheet.get_all_records()
+    data = sheet.get_all_records(
+        value_render_option="UNFORMATTED_VALUE",
+        numericise_ignore=["all"],
+    )
     header = [col.strip().upper() for col in sheet.row_values(1)]
 
     def _col_index(nombre):
@@ -139,7 +156,6 @@ def actualizar_estado_afiliado(ruc, nuevo_estado):
                 row.get("RUC", "")) == limpiar_ruc(ruc)),
             {},
         )
-
         # Orden esperado: RUC | RAZON_SOCIAL | FECHA_AFILIACION | ESTADO | CIUDAD | ACTUALIZACION_ESTADO
         new_row = [
             limpiar_ruc(ruc),
@@ -149,7 +165,28 @@ def actualizar_estado_afiliado(ruc, nuevo_estado):
             base_row.get("CIUDAD", ""),
             datetime.now().strftime("%Y-%m-%d %H:%M"),
         ]
-        sheet.append_row(new_row)
+
+        header_len = max(len(header), len(new_row))
+        # Buscar la primera fila realmente vacía (sin celdas con texto)
+        values = sheet.get_all_values(value_render_option="UNFORMATTED_VALUE")
+        target_row = None
+        for idx, row in enumerate(values[1:], start=2):
+            if not any((cell or "").strip() for cell in row):
+                target_row = idx
+                break
+        if target_row is None:
+            target_row = len(values) + 1
+
+        # Ajustar tamaño al header
+        if len(new_row) < header_len:
+            new_row += [""] * (header_len - len(new_row))
+        elif len(new_row) > header_len:
+            new_row = new_row[:header_len]
+
+        start_cell = rowcol_to_a1(target_row, 1)
+        end_cell = rowcol_to_a1(target_row, header_len)
+        sheet.update(f"{start_cell}:{end_cell}", [
+                     new_row], value_input_option="USER_ENTERED")
 
 
 def buscar_afiliado_por_ruc_base_datos(ruc):
@@ -280,7 +317,7 @@ def guardar_ventas_afiliado(data: Dict[str, str]):
         raise ValueError(f"Fila con columnas inesperadas: {fila}")
 
     # Inserta asegurando que se respeten las primeras columnas (A-J) en la siguiente fila disponible
-    next_row = len(sheet.get_all_values()) + 1
+    next_row = find_first_empty_row(sheet, start_row=2)
     start = f"A{next_row}"
     end = f"J{next_row}"
     sheet.update(f"{start}:{end}", [fila], value_input_option="USER_ENTERED")

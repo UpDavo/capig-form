@@ -8,6 +8,7 @@ import traceback
 import gspread
 from django.conf import settings
 from google.oauth2.service_account import Credentials
+from gspread.utils import rowcol_to_a1
 from gspread.exceptions import APIError, SpreadsheetNotFound, WorksheetNotFound
 
 try:
@@ -23,7 +24,23 @@ REQUIRED_SERVICE_FIELDS = {"private_key", "client_email", "project_id"}
 
 
 def _print_utf8(message):
-    print(str(message).encode("utf-8", errors="replace").decode("utf-8"))
+    """
+    Imprime en consola sin reventar en Windows cuando stdout tiene encoding CP1252.
+    Silencia OSError errno 22 (invalid argument) para no romper la vista.
+    """
+    try:
+        text = str(message).encode("utf-8", errors="replace").decode("utf-8")
+        try:
+            # En Windows, usar buffer evita problemas de encoding.
+            import sys
+            sys.stdout.buffer.write(
+                (text + "\n").encode("utf-8", errors="replace"))
+            sys.stdout.buffer.flush()
+        except Exception:
+            print(text)
+    except OSError as exc:  # pragma: no cover - defensivo
+        if getattr(exc, "errno", None) != 22:
+            raise
 
 
 def _load_service_account_info():
@@ -123,17 +140,44 @@ def get_google_sheet(sheet_id, worksheet_name):
         raise
 
 
+def find_first_empty_row(sheet, start_row=2):
+    """
+    Devuelve el índice de la primera fila vacía (sin texto) a partir de start_row.
+    Usa UNFORMATTED_VALUE para no introducir espacios por formato.
+    """
+    values = sheet.get_all_values(value_render_option="UNFORMATTED_VALUE")
+    if not values:
+        return start_row
+    for idx, row in enumerate(values[start_row - 1:], start=start_row):
+        if not any((cell or "").strip() for cell in row):
+            return idx
+    return len(values) + 1
+
+
 # ========================
 # INSERTAR UNA FILA
 # ========================
 def insert_row_to_sheet(sheet_id, worksheet_name, data):
     try:
         sheet = get_google_sheet(sheet_id, worksheet_name)
+        header = sheet.row_values(1)
+        header_len = max(len(header), len(data))
+
+        # Ajustar tamaño de data al header
+        if len(data) < header_len:
+            data = data + [""] * (header_len - len(data))
+        elif len(data) > header_len:
+            data = data[:header_len]
+
+        target_row = find_first_empty_row(sheet, start_row=2)
+        start = f"A{target_row}"
+        end = rowcol_to_a1(target_row, header_len)
+        sheet.update(f"{start}:{end}", [data],
+                     value_input_option="USER_ENTERED")
         logger.info("Insertando fila en hoja '%s': len=%s datos=%s",
                     worksheet_name, len(data), data)
         _print_utf8(
             f"Insertando {len(data)} valores en '{worksheet_name}': {data}")
-        sheet.append_row(data)
         return True
 
     except (WorksheetNotFound, SpreadsheetNotFound) as exc:

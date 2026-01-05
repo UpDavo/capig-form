@@ -4,7 +4,10 @@ from typing import Dict, List
 from django.conf import settings
 from gspread.utils import rowcol_to_a1
 
-from capig_form.services.google_sheets_service import get_google_sheet
+from capig_form.services.google_sheets_service import (
+    get_google_sheet,
+    find_first_empty_row,
+)
 
 
 def _normalize(col: str) -> str:
@@ -78,9 +81,8 @@ def guardar_nuevo_afiliado_en_google_sheets(data: Dict[str, str]) -> bool:
     header = sheet.row_values(2)
     fila = _build_fila(header, data)
 
-    # Primera fila libre (incluye encabezados); no usar filas personalizadas ni duplicadas
-    next_row = len(sheet.get_all_values()) + 1
-
+    # Primera fila realmente libre (omite filas con formato pero sin datos)
+    next_row = find_first_empty_row(sheet, start_row=2)
     start_cell = rowcol_to_a1(next_row, 1)
     end_cell = rowcol_to_a1(next_row, len(header))
     sheet.update(f"{start_cell}:{end_cell}", [fila])

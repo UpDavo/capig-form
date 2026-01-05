@@ -45,6 +45,7 @@ def _parsear_bloques_ventas(post_data):
             campo_normalizado] = (value or "").strip()
     return [bloques[i] for i in sorted(bloques)]
 
+
 def dashboard_view(request):
     """Vista del dashboard principal (con layout)"""
     return render(request, 'dashboard.html')
