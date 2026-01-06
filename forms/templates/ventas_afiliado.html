@@ -32,7 +32,7 @@
                             </div>
                             <div class="ms-auto" style="min-width: 200px;">
                                 <label for="ventas_previas_select" class="form-label mb-1">Año</label>
-                                <select id="ventas_previas_select" class="form-select form-select-sm">
+                                <select id="ventas_previas_select" class="form-select form-select-sm" onchange="if(window.renderVentaPreviaSelect){ window.renderVentaPreviaSelect(this.value); }">
                                     <option value="">Seleccione</option>
                                     {% for anio in ventas_previas_years %}
                                     <option value="{{ anio }}">{{ anio }}</option>
@@ -161,6 +161,24 @@
       }
     }
 
+    const normalizeYear = (val) => (val ?? "").toString().trim();
+    const normalizeMoney = (val) => (val ?? "").toString().trim();
+    const formatMoney = (val) => {
+      const raw = (val ?? "").toString().trim();
+      const rawNorm = raw.toLowerCase().replace(/\s+/g, "");
+      if (!raw || rawNorm === "noreporta" || rawNorm === "nr" || rawNorm === "noaplica") return "No reporta";
+      const num = Number(raw.replace(/[^0-9.-]/g, ""));
+      if (!isFinite(num)) return raw || "No reporta";
+      return `$ ${num.toLocaleString("es-EC", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    };
+    const ventasPreviasNorm = ventasPrevias.map((v) => ({
+      ...v,
+      anio: normalizeYear(v.anio),
+      ventas_estimadas: normalizeMoney(v.ventas_estimadas),
+      comparativo: (v.comparativo ?? "").toString().trim(),
+      fecha_registro: (v.fecha_registro ?? "").toString().trim(),
+    }));
+
     function normalizar(valor) {
       return (valor || "").toString().trim().toLowerCase();
     }
@@ -171,13 +189,15 @@
         prevResumen.innerHTML = '<div class="text-muted">Seleccione un año para ver el resumen.</div>';
         return;
       }
-      const match = ventasPrevias.find((v) => (v.anio || "").toString() === (anio || "").toString());
+      const match = ventasPreviasNorm.find(
+        (v) => normalizeYear(v.anio) === normalizeYear(anio)
+      );
       if (!match) {
         prevResumen.innerHTML = '<div class="text-muted">No hay registros para el año seleccionado.</div>';
         return;
       }
       const comparativo = match.comparativo || "Sin dato";
-      const monto = match.ventas_estimadas || "Sin dato";
+      const monto = formatMoney(match.ventas_estimadas);
       const fecha = match.fecha_registro || "Sin fecha";
         prevResumen.innerHTML = `
         <div class="d-flex flex-wrap gap-3">
@@ -200,7 +220,9 @@
         infoEl.textContent = "";
         return;
       }
-      const match = ventasPrevias.find((v) => (v.anio || "").toString() === (anio || "").toString());
+      const match = ventasPreviasNorm.find(
+        (v) => normalizeYear(v.anio) === normalizeYear(anio)
+      );
       if (!match) {
         infoEl.style.display = "none";
         infoEl.textContent = "";
@@ -208,7 +230,7 @@
       }
       infoEl.style.display = "block";
       const comparativo = match.comparativo || "Sin dato";
-      const monto = match.ventas_estimadas || "Sin dato";
+      const monto = formatMoney(match.ventas_estimadas);
       infoEl.textContent = `Total histórico: ${monto}`;
 
       // Autorrellenar si el campo está vacío para no sobreescribir la entrada actual
@@ -317,6 +339,11 @@
       prevSelect.addEventListener("change", (e) => {
         renderVentaPrevia(e.target.value);
       });
+      if (prevSelect.value) {
+        renderVentaPrevia(prevSelect.value);
+      }
+      // Exponer para el onchange inline como fallback
+      window.renderVentaPreviaSelect = renderVentaPrevia;
     }
     if (registroSelect) {
       toggleCamposVentas(registroSelect.value);

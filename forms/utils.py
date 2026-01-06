@@ -1,7 +1,7 @@
 import os
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict
 
 from django.conf import settings
@@ -10,6 +10,7 @@ from gspread.utils import rowcol_to_a1
 from capig_form.services.google_sheets_service import (
     get_google_sheet,
     find_first_empty_row,
+    ensure_row_capacity,
 )
 
 # Encabezados mínimos usados en la hoja SOCIOS
@@ -23,13 +24,47 @@ EXPECTED_BASE_HEADERS = [
 
 def limpiar_ruc(valor):
     """Normaliza el RUC removiendo comillas, espacios y NBSP."""
-    return (
+    txt = (
         str(valor)
         .replace("'", "")
         .replace('"', "")
         .replace("\u00a0", " ")
         .strip()
     )
+    digits = re.sub(r"\D", "", txt)
+    if len(digits) == 13:
+        return digits
+    return txt
+
+
+def _normalize_row_keys(row: dict):
+    """Devuelve un diccionario con llaves str upper + strip para tolerar espacios en encabezados."""
+    return {(k or "").strip().upper(): v for k, v in (row or {}).items()}
+
+
+def excel_serial_to_iso(valor):
+    """
+    Convierte serial de Excel (float/int o str numérico) a 'YYYY-MM-DD'.
+    Si no aplica, devuelve la cadena limpia.
+    """
+    if isinstance(valor, str):
+        val_strip = valor.strip()
+        # Intentar como número serial en string
+        if re.fullmatch(r"-?\d+(\.\d+)?", val_strip):
+            try:
+                valor = float(val_strip)
+            except Exception:
+                return val_strip
+        else:
+            return val_strip
+
+    if isinstance(valor, (int, float)) and valor:
+        try:
+            base = datetime(1899, 12, 30)  # base Excel/Sheets
+            return (base + timedelta(days=float(valor))).date().isoformat()
+        except Exception:
+            return str(valor)
+    return str(valor).strip() if valor is not None else ""
 
 
 def _get_estado_sheet():
@@ -48,20 +83,35 @@ def _get_base_datos_sheet():
     return get_google_sheet(sheet_id, "SOCIOS")
 
 
-def _get_all_records_flexible(sheet, head=2):
+def _get_all_records_flexible(sheet, head=2, required_keys=("RUC",)):
     """
     Lee registros intentando con el head indicado y, si falla (sheet vacío
-    o encabezados cambiados), vuelve a head=1. Devuelve lista vacía si nada funciona.
+    o encabezados cambiados), vuelve a head=1. Si no encuentra columnas
+    requeridas, también prueba el fallback. Devuelve lista vacía si nada funciona.
     """
+    required = {k.strip().upper() for k in (required_keys or [])}
     for h in (head, 1):
         try:
-            return sheet.get_all_records(
+            rows = sheet.get_all_records(
                 head=h,
                 value_render_option="UNFORMATTED_VALUE",
                 numericise_ignore=["all"],
             )
         except Exception:
             continue
+
+        if not rows and h != 1:
+            # Intentar siguiente head en caso de lista vacía
+            continue
+
+        if required:
+            headers = {str(k).strip().upper()
+                       for k in (rows[0].keys() if rows else [])}
+            if headers and not (headers & required):
+                # Headers no parecen correctos, probar fallback
+                continue
+
+        return rows
     return []
 
 
@@ -85,7 +135,9 @@ def buscar_afiliado_por_ruc(ruc):
         return {
             "razon_social": afiliado.get("RAZON_SOCIAL", ""),
             "ciudad": afiliado.get("CIUDAD", ""),
-            "fecha_afiliacion": afiliado.get("FECHA_AFILIACION", ""),
+            "fecha_afiliacion": excel_serial_to_iso(
+                afiliado.get("FECHA_AFILIACION", "")
+            ),
             "estado": afiliado.get("ESTADO", ""),
         }
 
@@ -101,7 +153,9 @@ def buscar_afiliado_por_ruc(ruc):
         return {
             "razon_social": afiliado.get("RAZON_SOCIAL", ""),
             "ciudad": afiliado.get("CIUDAD", ""),
-            "fecha_afiliacion": afiliado.get("FECHA_AFILIACION", ""),
+            "fecha_afiliacion": excel_serial_to_iso(
+                afiliado.get("FECHA_AFILIACION", "")
+            ),
             "estado": afiliado.get("ESTADO", ""),
         }
 
@@ -111,7 +165,9 @@ def buscar_afiliado_por_ruc(ruc):
     return {
         "razon_social": base_row.get("RAZON_SOCIAL", ""),
         "ciudad": base_row.get("CIUDAD", ""),
-        "fecha_afiliacion": base_row.get("FECHA_AFILIACION", ""),
+        "fecha_afiliacion": excel_serial_to_iso(
+            base_row.get("FECHA_AFILIACION", "")
+        ),
         "estado": "",
     }
 
@@ -167,15 +223,8 @@ def actualizar_estado_afiliado(ruc, nuevo_estado):
         ]
 
         header_len = max(len(header), len(new_row))
-        # Buscar la primera fila realmente vacía (sin celdas con texto)
-        values = sheet.get_all_values(value_render_option="UNFORMATTED_VALUE")
-        target_row = None
-        for idx, row in enumerate(values[1:], start=2):
-            if not any((cell or "").strip() for cell in row):
-                target_row = idx
-                break
-        if target_row is None:
-            target_row = len(values) + 1
+        target_row = find_first_empty_row(sheet, start_row=2)
+        ensure_row_capacity(sheet, target_row)
 
         # Ajustar tamaño al header
         if len(new_row) < header_len:
@@ -199,7 +248,9 @@ def buscar_afiliado_por_ruc_base_datos(ruc):
             return {
                 "razon_social": row.get("RAZON_SOCIAL", ""),
                 "ciudad": row.get("CIUDAD", ""),
-                "fecha_afiliacion": row.get("FECHA_AFILIACION", ""),
+                "fecha_afiliacion": excel_serial_to_iso(
+                    row.get("FECHA_AFILIACION", "")
+                ),
             }
     return None
 
@@ -222,19 +273,27 @@ def obtener_ventas_por_ruc(ruc):
     rows = _get_all_records_flexible(sheet, head=2)
     ventas = []
     for row in rows:
-        if limpiar_ruc(row.get("RUC", "")) != ruc_norm:
+        row_norm = _normalize_row_keys(row)
+        if limpiar_ruc(row_norm.get("RUC", "")) != ruc_norm:
             continue
-        anio = str(row.get("ANIO") or row.get("AÑO")
-                   or row.get("ANO") or "").strip()
-        comparativo = row.get("COMPARATIVO", "")
-        ventas_estimadas = (
-            row.get("VENTAS_ESTIMADAS")
-            or row.get("MONTO_ESTIMADO")
-            or row.get("MONTO_VENTAS")
-            or row.get("VENTAS_ESTIMADA")
+        anio = str(row_norm.get("ANIO") or row_norm.get("AÑO")
+                   or row_norm.get("ANO") or "").strip()
+        comparativo = row_norm.get("COMPARATIVO", "")
+        bruto_ventas = (
+            row_norm.get("VENTAS_ESTIMADAS")
+            or row_norm.get("MONTO_ESTIMADO")
+            or row_norm.get("MONTO_VENTAS")
+            or row_norm.get("VENTAS_ESTIMADA")
             or ""
         )
-        fecha_registro = row.get("FECHA_REGISTRO", "") or row.get("FECHA", "")
+        if isinstance(bruto_ventas, (int, float)):
+            ventas_estimadas = str(bruto_ventas)
+        else:
+            ventas_estimadas = (bruto_ventas or "").strip()
+
+        fecha_registro = excel_serial_to_iso(
+            row_norm.get("FECHA_REGISTRO", "") or row_norm.get("FECHA", "")
+        )
         ventas.append(
             {
                 "anio": anio,
@@ -254,22 +313,29 @@ def obtener_ventas_por_ruc(ruc):
     if base_rows:
         try:
             base_row = next(
-                (row for row in base_rows if limpiar_ruc(
-                    row.get("RUC", "")) == ruc_norm),
+                (
+                    row for row in base_rows
+                    if limpiar_ruc(_normalize_row_keys(row).get("RUC", "")) == ruc_norm
+                ),
                 None,
             )
         except Exception:
             base_row = None
         if base_row:
+            base_row_norm = _normalize_row_keys(base_row)
             existing_years = {v.get("anio") for v in ventas if v.get("anio")}
-            for key, value in base_row.items():
-                key_str = (key or "").strip()
+            for key, value in base_row_norm.items():
+                key_str = (key or "").replace("\u00a0", "").strip()
                 if not key_str or not re.fullmatch(r"\d{4}", key_str):
                     continue
                 if key_str in existing_years:
                     continue
-                val_str = (value or "").strip() if isinstance(
-                    value, str) else value
+                if isinstance(value, (int, float)):
+                    val_str = str(value)
+                elif isinstance(value, str):
+                    val_str = value.strip()
+                else:
+                    val_str = ""
                 if val_str in ("", None):
                     continue
                 ventas.append(
@@ -299,9 +365,10 @@ def guardar_ventas_afiliado(data: Dict[str, str]):
         raise RuntimeError("SHEET_PATH no esta configurado.")
 
     sheet = get_google_sheet(sheet_id, "VENTAS_SOCIO")
+    ruc_norm = limpiar_ruc(data.get("ruc", ""))
 
     fila = [
-        data.get("ruc", ""),
+        ruc_norm,
         data.get("razon_social", ""),
         data.get("ciudad", ""),
         data.get("fecha_afiliacion", ""),
@@ -318,6 +385,7 @@ def guardar_ventas_afiliado(data: Dict[str, str]):
 
     # Inserta asegurando que se respeten las primeras columnas (A-J) en la siguiente fila disponible
     next_row = find_first_empty_row(sheet, start_row=2)
+    ensure_row_capacity(sheet, next_row)
     start = f"A{next_row}"
     end = f"J{next_row}"
     sheet.update(f"{start}:{end}", [fila], value_input_option="USER_ENTERED")
