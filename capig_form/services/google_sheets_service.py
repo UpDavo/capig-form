@@ -149,9 +149,20 @@ def find_first_empty_row(sheet, start_row=2):
     if not values:
         return start_row
     for idx, row in enumerate(values[start_row - 1:], start=start_row):
-        if not any((cell or "").strip() for cell in row):
+        if not any(((str(cell) if cell is not None else "").strip() for cell in row)):
             return idx
     return len(values) + 1
+
+
+def ensure_row_capacity(sheet, target_row):
+    """Amplía la hoja si el índice de fila objetivo excede el tamaño actual."""
+    try:
+        current = sheet.row_count
+        if target_row > current:
+            sheet.add_rows(target_row - current)
+    except Exception:
+        # Silenciar si la API no expone row_count; se intentará y fallará en update si persiste.
+        pass
 
 
 # ========================

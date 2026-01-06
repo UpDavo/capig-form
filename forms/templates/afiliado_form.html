@@ -13,59 +13,66 @@
     <form method="post" action="{% url 'forms:nuevo_afiliado' %}">
         {% csrf_token %}
 
+        {% if form_error %}
+        <div class="alert alert-danger small mb-3">{{ form_error }}</div>
+        {% endif %}
+
         <div class="mb-4">
             <label class="form-label">Razón Social <span class="text-danger">*</span></label>
-            <input type="text" name="razon_social" class="form-control" required>
+            <input type="text" name="razon_social" class="form-control" value="{{ razon_social|default_if_none:'' }}" required>
         </div>
 
         <div class="mb-4">
             <label class="form-label">RUC <span class="text-danger">*</span></label>
-            <input type="text" name="ruc" class="form-control" required>
+            <input type="text" name="ruc" class="form-control" value="{{ ruc|default_if_none:'' }}" required>
+            {% if ruc_error %}
+            <div class="text-danger small mt-1">{{ ruc_error }}</div>
+            {% endif %}
         </div>
 
         <div class="mb-4">
             <label class="form-label">Ciudad <span class="text-danger">*</span></label>
-            <input type="text" name="ciudad" class="form-control" required>
+            <input type="text" name="ciudad" class="form-control" value="{{ ciudad|default_if_none:'' }}" required>
         </div>
 
         <div class="mb-4">
             <label class="form-label">Dirección <span class="text-danger">*</span></label>
-            <input type="text" name="direccion" class="form-control" required>
+            <input type="text" name="direccion" class="form-control" value="{{ direccion|default_if_none:'' }}" required>
         </div>
 
         <div class="mb-4">
             <label class="form-label">Teléfono <span class="text-danger">*</span></label>
-            <input type="text" name="telefono" class="form-control" required>
+            <input type="text" name="telefono" class="form-control" value="{{ telefono|default_if_none:'' }}" required>
         </div>
 
         <div class="mb-4">
             <label class="form-label">Email <span class="text-danger">*</span></label>
-            <input type="email" name="email" class="form-control" required>
+            <input type="email" name="email" class="form-control" value="{{ email|default_if_none:'' }}" required>
         </div>
 
         <div class="mb-4">
             <label class="form-label">Representante Legal <span class="text-danger">*</span></label>
-            <input type="text" name="representante" class="form-control" required>
+            <input type="text" name="representante" class="form-control" value="{{ representante|default_if_none:'' }}" required>
         </div>
 
         <div class="mb-4">
             <label class="form-label">Cargo <span class="text-danger">*</span></label>
-            <input type="text" name="cargo" class="form-control" required>
+            <input type="text" name="cargo" class="form-control" value="{{ cargo|default_if_none:'' }}" required>
         </div>
 
         <div class="mb-4">
             <label class="form-label">Género <span class="text-danger">*</span></label>
             <select name="genero" class="form-select" required>
                 <option value="">Seleccione una opción</option>
-                <option value="Hombre">Hombre</option>
-                <option value="Mujer">Mujer</option>
-                <option value="Prefiero no decir">Prefiero no decir</option>
+                <option value="Hombre" {% if genero == "Hombre" %}selected{% endif %}>Hombre</option>
+                <option value="Mujer" {% if genero == "Mujer" %}selected{% endif %}>Mujer</option>
+                <option value="Prefiero no decir" {% if genero == "Prefiero no decir" %}selected{% endif %}>Prefiero no decir</option>
             </select>
         </div>
 
         <div class="mb-4">
             <label class="form-label">Número de Colaboradores</label>
-            <input type="number" name="colaboradores" class="form-control" min="0" step="1" placeholder="Ingrese el número de colaboradores">
+            <input type="number" name="colaboradores" class="form-control" min="0" step="1" placeholder="Ingrese el número de colaboradores" value="{{ colaboradores|default_if_none:'' }}">
         </div>
 
         <div class="mb-4">
@@ -73,7 +80,7 @@
             <select class="form-select" id="sector" name="sector" required>
                 <option value="">Seleccione un sector</option>
                 {% for sector in sectores %}
-                    <option value="{{ sector }}">{{ sector }}</option>
+                    <option value="{{ sector }}" {% if sector == sector_sel %}selected{% endif %}>{{ sector }}</option>
                 {% empty %}
                     <option value="" disabled>No hay sectores disponibles</option>
                 {% endfor %}
@@ -84,18 +91,18 @@
             <label for="tamano" class="form-label">Tamaño <span class="text-danger">*</span></label>
             <select class="form-select" id="tamano" name="tamano" required>
                 <option value="">Seleccione un tamaño</option>
-                <option value="MICRO">MICRO</option>
-                <option value="PEQUEÑA">PEQUEÑA</option>
-                <option value="MEDIANA">MEDIANA</option>
-                <option value="GRANDE">GRANDE</option>
+                <option value="MICRO" {% if tamano_sel == "MICRO" %}selected{% endif %}>MICRO</option>
+                <option value="PEQUEÑA" {% if tamano_sel == "PEQUEÑA" %}selected{% endif %}>PEQUEÑA</option>
+                <option value="MEDIANA" {% if tamano_sel == "MEDIANA" %}selected{% endif %}>MEDIANA</option>
+                <option value="GRANDE" {% if tamano_sel == "GRANDE" %}selected{% endif %}>GRANDE</option>
             </select>
         </div>
 
         <div class="mb-4">
             <label class="form-label">Estado <span class="text-danger">*</span></label>
             <select name="estado" class="form-select" required>
-                <option value="PAGADO">PAGADO</option>
-                <option value="NO PAGADO">NO PAGADO</option>
+                <option value="PAGADO" {% if estado_sel == "PAGADO" %}selected{% endif %}>PAGADO</option>
+                <option value="NO PAGADO" {% if estado_sel == "NO PAGADO" %}selected{% endif %}>NO PAGADO</option>
             </select>
         </div>
 
@@ -109,7 +116,6 @@
 {% block extra_js %}
 <script>
     $(document).ready(function() {
-        // Mostrar loader al enviar formulario
         $('form').on('submit', function() {
             $('#globalLoader').addClass('active');
         });
