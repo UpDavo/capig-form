@@ -32,14 +32,35 @@ def limpiar_ruc(valor):
         .strip()
     )
     digits = re.sub(r"\D", "", txt)
-    if len(digits) == 13:
+    if digits:
         return digits
     return txt
+
+
+def _ruc_compare_key(valor):
+    """
+    Normaliza RUC para comparaciones robustas.
+    Ignora ceros a la izquierda para tolerar conversiones de Sheets.
+    """
+    ruc = limpiar_ruc(valor)
+    if re.fullmatch(r"\d+", ruc or ""):
+        return ruc.lstrip("0") or "0"
+    return (ruc or "").strip().upper()
 
 
 def _normalize_row_keys(row: dict):
     """Devuelve un diccionario con llaves str upper + strip para tolerar espacios en encabezados."""
     return {(k or "").strip().upper(): v for k, v in (row or {}).items()}
+
+
+def _normalize_header_key(value):
+    """Normaliza encabezados para comparaciones (espacios/NBSP/mayúsculas)."""
+    return (
+        str(value or "")
+        .replace("\u00a0", " ")
+        .strip()
+        .upper()
+    )
 
 
 def excel_serial_to_iso(valor):
@@ -85,12 +106,27 @@ def _get_base_datos_sheet():
 
 def _get_all_records_flexible(sheet, head=2, required_keys=("RUC",)):
     """
-    Lee registros intentando con el head indicado y, si falla (sheet vacío
-    o encabezados cambiados), vuelve a head=1. Si no encuentra columnas
-    requeridas, también prueba el fallback. Devuelve lista vacía si nada funciona.
+    Lee registros probando encabezados en orden: head solicitado, 1 y 2.
+    Valida que la cabecera se parezca a la esperada (required_keys).
     """
-    required = {k.strip().upper() for k in (required_keys or [])}
-    for h in (head, 1):
+    required = {_normalize_header_key(k) for k in (required_keys or []) if k}
+
+    candidate_heads = []
+    for h in (head, 1, 2):
+        if h and h not in candidate_heads:
+            candidate_heads.append(h)
+
+    for h in candidate_heads:
+        if required:
+            try:
+                header_values = sheet.row_values(h)
+            except Exception:
+                continue
+            header_keys = {_normalize_header_key(v)
+                           for v in header_values if str(v or "").strip()}
+            if header_keys and not (header_keys & required):
+                continue
+
         try:
             rows = sheet.get_all_records(
                 head=h,
@@ -100,17 +136,6 @@ def _get_all_records_flexible(sheet, head=2, required_keys=("RUC",)):
         except Exception:
             continue
 
-        if not rows and h != 1:
-            # Intentar siguiente head en caso de lista vacía
-            continue
-
-        if required:
-            headers = {str(k).strip().upper()
-                       for k in (rows[0].keys() if rows else [])}
-            if headers and not (headers & required):
-                # Headers no parecen correctos, probar fallback
-                continue
-
         return rows
     return []
 
@@ -119,13 +144,14 @@ def buscar_afiliado_por_ruc(ruc):
     """
     Busca primero en ESTADO_SOCIO; si falta info, completa desde SOCIOS.
     """
-    ruc = limpiar_ruc(ruc)
+    ruc_key = _ruc_compare_key(ruc)
 
     estado_sheet = _get_estado_sheet()
     estado_rows = _get_all_records_flexible(estado_sheet, head=1)
 
     afiliado = next(
-        (row for row in estado_rows if limpiar_ruc(row.get("RUC", "")) == ruc),
+        (row for row in estado_rows if _ruc_compare_key(
+            row.get("RUC", "")) == ruc_key),
         None,
     )
 
@@ -145,7 +171,8 @@ def buscar_afiliado_por_ruc(ruc):
     base_rows = _get_all_records_flexible(base_sheet, head=2)
 
     base_row = next(
-        (row for row in base_rows if limpiar_ruc(row.get("RUC", "")) == ruc),
+        (row for row in base_rows if _ruc_compare_key(
+            row.get("RUC", "")) == ruc_key),
         None,
     )
 
@@ -191,7 +218,7 @@ def actualizar_estado_afiliado(ruc, nuevo_estado):
     encontrado = False
 
     for idx, row in enumerate(data, start=2):
-        if limpiar_ruc(row.get("RUC", "")) == limpiar_ruc(ruc):
+        if _ruc_compare_key(row.get("RUC", "")) == _ruc_compare_key(ruc):
             encontrado = True
             if col_estado:
                 sheet.update_cell(idx, col_estado, nuevo_estado)
@@ -208,8 +235,8 @@ def actualizar_estado_afiliado(ruc, nuevo_estado):
         base_sheet = _get_base_datos_sheet()
         base_rows = _get_all_records_flexible(base_sheet, head=2)
         base_row = next(
-            (row for row in base_rows if limpiar_ruc(
-                row.get("RUC", "")) == limpiar_ruc(ruc)),
+            (row for row in base_rows if _ruc_compare_key(
+                row.get("RUC", "")) == _ruc_compare_key(ruc)),
             {},
         )
         # Orden esperado: RUC | RAZON_SOCIAL | FECHA_AFILIACION | ESTADO | CIUDAD | ACTUALIZACION_ESTADO
@@ -240,11 +267,11 @@ def actualizar_estado_afiliado(ruc, nuevo_estado):
 
 def buscar_afiliado_por_ruc_base_datos(ruc):
     """Busca un afiliado únicamente en la hoja SOCIOS."""
-    ruc = limpiar_ruc(ruc)
+    ruc_key = _ruc_compare_key(ruc)
     sheet = _get_base_datos_sheet()
     rows = _get_all_records_flexible(sheet, head=2)
     for row in rows:
-        if limpiar_ruc(row.get("RUC", "")) == ruc:
+        if _ruc_compare_key(row.get("RUC", "")) == ruc_key:
             return {
                 "razon_social": row.get("RAZON_SOCIAL", ""),
                 "ciudad": row.get("CIUDAD", ""),
@@ -257,8 +284,8 @@ def buscar_afiliado_por_ruc_base_datos(ruc):
 
 def obtener_ventas_por_ruc(ruc):
     """Obtiene ventas históricas del afiliado desde VENTAS_SOCIO y, si no hay, desde columnas por año en SOCIOS."""
-    ruc_norm = limpiar_ruc(ruc)
-    if not ruc_norm:
+    ruc_key = _ruc_compare_key(ruc)
+    if not ruc_key:
         return []
 
     sheet_id = os.getenv("SHEET_PATH") or getattr(settings, "SHEET_PATH", "")
@@ -270,11 +297,15 @@ def obtener_ventas_por_ruc(ruc):
     except Exception:
         return []
 
-    rows = _get_all_records_flexible(sheet, head=2)
+    rows = _get_all_records_flexible(
+        sheet,
+        head=1,
+        required_keys=("RUC", "RAZON_SOCIAL", "ANIO", "AÑO", "ANO"),
+    )
     ventas = []
     for row in rows:
         row_norm = _normalize_row_keys(row)
-        if limpiar_ruc(row_norm.get("RUC", "")) != ruc_norm:
+        if _ruc_compare_key(row_norm.get("RUC", "")) != ruc_key:
             continue
         anio = str(row_norm.get("ANIO") or row_norm.get("AÑO")
                    or row_norm.get("ANO") or "").strip()
@@ -283,6 +314,7 @@ def obtener_ventas_por_ruc(ruc):
             row_norm.get("VENTAS_ESTIMADAS")
             or row_norm.get("MONTO_ESTIMADO")
             or row_norm.get("MONTO_VENTAS")
+            or row.get("MONTO_VENTAS ")
             or row_norm.get("VENTAS_ESTIMADA")
             or ""
         )
@@ -315,7 +347,7 @@ def obtener_ventas_por_ruc(ruc):
             base_row = next(
                 (
                     row for row in base_rows
-                    if limpiar_ruc(_normalize_row_keys(row).get("RUC", "")) == ruc_norm
+                    if _ruc_compare_key(_normalize_row_keys(row).get("RUC", "")) == ruc_key
                 ),
                 None,
             )
@@ -366,9 +398,11 @@ def guardar_ventas_afiliado(data: Dict[str, str]):
 
     sheet = get_google_sheet(sheet_id, "VENTAS_SOCIO")
     ruc_norm = limpiar_ruc(data.get("ruc", ""))
+    # Forzar texto en Sheets para conservar ceros iniciales.
+    ruc_text = f"'{ruc_norm}" if re.fullmatch(r"\d+", ruc_norm or "") else ruc_norm
 
     fila = [
-        ruc_norm,
+        ruc_text,
         data.get("razon_social", ""),
         data.get("ciudad", ""),
         data.get("fecha_afiliacion", ""),
