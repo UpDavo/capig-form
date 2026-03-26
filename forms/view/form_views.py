@@ -16,7 +16,11 @@ from capig_form.services.google_sheets_service import (
     get_google_sheet,
     insert_row_to_sheet,
 )
-from forms.afiliacion_handler import guardar_nuevo_afiliado_en_google_sheets
+from forms.afiliacion_handler import (
+    EMAIL_COLUMN_SEQUENCE,
+    PHONE_COLUMN_SEQUENCE,
+    guardar_nuevo_afiliado_en_google_sheets,
+)
 from forms.utils import (
     actualizar_estado_afiliado,
     buscar_afiliado_por_ruc,
@@ -34,10 +38,6 @@ AFILIADO_FORM_FIELDS = [
     "ruc",
     "ciudad",
     "direccion",
-    "telefono_1",
-    "telefono_2",
-    "email_1",
-    "email_2",
     "actividad",
     "representante",
     "cargo",
@@ -62,6 +62,7 @@ AFILIADO_FORM_FIELDS = [
     "tamano",
     "estado",
 ]
+AFILIADO_LIST_FIELDS = ["telefonos", "emails"]
 AFILIADO_EXECUTIVE_FIELDS = [
     "gerente_general_nombre",
     "genero",
@@ -103,12 +104,21 @@ def _parsear_bloques_ventas(post_data):
 def _build_afiliado_form_data(post_data=None):
     """Construye el estado del formulario de afiliado con defaults y datos enviados."""
     data = {field: "" for field in AFILIADO_FORM_FIELDS}
+    data["telefonos"] = [""]
+    data["emails"] = [""]
     data["estado"] = "PAGADO"
     if not post_data:
         return data
 
     for field in AFILIADO_FORM_FIELDS:
         data[field] = (post_data.get(field, "") or "").strip()
+
+    for field_name in AFILIADO_LIST_FIELDS:
+        values = []
+        if hasattr(post_data, "getlist"):
+            values = [(value or "").strip() for value in post_data.getlist(field_name)]
+        values = values or [""]
+        data[field_name] = values
 
     if not data["estado"]:
         data["estado"] = "PAGADO"
@@ -120,8 +130,8 @@ def _build_afiliado_form_context(sectores, form_data=None):
     return {
         "sectores": sectores,
         "form_data": data,
-        "show_phone_2": bool(data.get("telefono_2")),
-        "show_email_2": bool(data.get("email_2")),
+        "max_phone_fields": len(PHONE_COLUMN_SEQUENCE),
+        "max_email_fields": len(EMAIL_COLUMN_SEQUENCE),
         "show_executive_contacts": any(data.get(field) for field in AFILIADO_EXECUTIVE_FIELDS),
     }
 
