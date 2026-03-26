@@ -12,6 +12,8 @@ gspread==6.2.1
 httplib2==0.31.0
 idna==3.11
 oauthlib==3.3.1
+openpyxl==3.1.5
+pandas==2.2.3
 pyasn1==0.6.1
 pyasn1_modules==0.4.2
 pyparsing==3.1.4
@@ -24,3 +26,4 @@ sqlparse==0.5.3
 typing_extensions==4.13.2
 urllib3==2.2.3
 gunicorn
+django-extensions

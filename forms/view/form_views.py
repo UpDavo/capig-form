@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import pytz
 from django.conf import settings
 from django.contrib import messages
-from django.shortcuts import render, redirect
+from django.shortcuts import redirect, render
 from django.utils.timezone import now
 from django.views.decorators.http import require_GET, require_http_methods
 
@@ -29,6 +29,57 @@ from forms.utils import (
 logger = logging.getLogger(__name__)
 
 VENTA_KEY_PATTERN = re.compile(r"ventas\[(\d+)\]\[(\w+)\]")
+AFILIADO_FORM_FIELDS = [
+    "razon_social",
+    "ruc",
+    "ciudad",
+    "direccion",
+    "telefono_1",
+    "telefono_2",
+    "email_1",
+    "email_2",
+    "actividad",
+    "representante",
+    "cargo",
+    "gerente_general_nombre",
+    "genero",
+    "gerente_general_contacto",
+    "gerente_general_email",
+    "gerente_fin_nombre",
+    "gerente_fin_contacto",
+    "gerente_fin_email",
+    "gerente_rrhh_nombre",
+    "gerente_rrhh_contacto",
+    "gerente_rrhh_email",
+    "gerente_comercial_nombre",
+    "gerente_comercial_contacto",
+    "gerente_comercial_email",
+    "gerente_produccion_nombre",
+    "gerente_produccion_contacto",
+    "gerente_produccion_email",
+    "colaboradores",
+    "sector",
+    "tamano",
+    "estado",
+]
+AFILIADO_EXECUTIVE_FIELDS = [
+    "gerente_general_nombre",
+    "genero",
+    "gerente_general_contacto",
+    "gerente_general_email",
+    "gerente_fin_nombre",
+    "gerente_fin_contacto",
+    "gerente_fin_email",
+    "gerente_rrhh_nombre",
+    "gerente_rrhh_contacto",
+    "gerente_rrhh_email",
+    "gerente_comercial_nombre",
+    "gerente_comercial_contacto",
+    "gerente_comercial_email",
+    "gerente_produccion_nombre",
+    "gerente_produccion_contacto",
+    "gerente_produccion_email",
+]
 
 
 def _entrada_venta_vacia():
@@ -49,17 +100,42 @@ def _parsear_bloques_ventas(post_data):
     return [bloques[i] for i in sorted(bloques)]
 
 
+def _build_afiliado_form_data(post_data=None):
+    """Construye el estado del formulario de afiliado con defaults y datos enviados."""
+    data = {field: "" for field in AFILIADO_FORM_FIELDS}
+    data["estado"] = "PAGADO"
+    if not post_data:
+        return data
+
+    for field in AFILIADO_FORM_FIELDS:
+        data[field] = (post_data.get(field, "") or "").strip()
+
+    if not data["estado"]:
+        data["estado"] = "PAGADO"
+    return data
+
+
+def _build_afiliado_form_context(sectores, form_data=None):
+    data = form_data or _build_afiliado_form_data()
+    return {
+        "sectores": sectores,
+        "form_data": data,
+        "show_phone_2": bool(data.get("telefono_2")),
+        "show_email_2": bool(data.get("email_2")),
+        "show_executive_contacts": any(data.get(field) for field in AFILIADO_EXECUTIVE_FIELDS),
+    }
+
+
 def dashboard_view(request):
-    """Vista del dashboard principal (con layout)."""
+    """Vista del dashboard principal."""
     return render(request, "dashboard.html")
 
 
 def _obtener_sectores():
-    """Devuelve la lista de sectores desde la hoja 'SECTOR' (columna A, desde A2)."""
+    """Devuelve la lista de sectores desde la hoja SECTOR."""
     try:
         sheet = get_google_sheet(settings.SHEET_PATH, "SECTOR")
     except Exception:
-        # Intentar encontrar la hoja por nombre, aunque tenga espacios o diferencias de mayúsculas/minúsculas
         try:
             client = _get_client()
             spreadsheet = client.open_by_key(settings.SHEET_PATH)
@@ -74,23 +150,21 @@ def _obtener_sectores():
 
     try:
         valores = sheet.col_values(1)
-        # Saltar encabezado (fila 1) y limpiar vacíos
-        sectores = [val.strip() for val in valores[1:] if val.strip()]
-        return sectores
+        return [val.strip() for val in valores[1:] if val.strip()]
     except Exception:
         return []
 
 
 def _codigo_seguridad_valido(request):
-    """Valida el código de seguridad de 6 dígitos enviado en el POST."""
+    """Valida el codigo de seguridad enviado en el POST."""
     codigo = (request.POST.get("security_code") or "").strip()
     return codigo and codigo == getattr(settings, "SECURITY_CODE", "")
 
 
 def _to_iso_date(fecha_str: str) -> str:
     """
-    Intenta convertir fechas como 'DD/MM/YYYY' o 'YYYY-MM-DD' a 'YYYY-MM-DD'.
-    Si recibe un serial de Excel (int/float), lo convierte. Si falla, retorna la cadena original.
+    Intenta convertir fechas como DD/MM/YYYY o YYYY-MM-DD a YYYY-MM-DD.
+    Si recibe un serial de Excel, tambien lo convierte.
     """
     if fecha_str is None:
         return fecha_str
@@ -113,9 +187,9 @@ def _to_iso_date(fecha_str: str) -> str:
 
 @require_http_methods(["GET", "POST"])
 def diag_form_view(request):
-    """Vista para el formulario de diagnóstico."""
+    """Vista para el formulario de diagnostico."""
     if request.method == "POST":
-        SHEET_NAME = "ASESORIAS"
+        sheet_name = "ASESORIAS"
 
         razon_social = request.POST.get("razon_social")
         tipo_diagnostico = request.POST.get("tipo_diagnostico")
@@ -130,13 +204,13 @@ def diag_form_view(request):
 
         success = insert_row_to_sheet(
             settings.SHEET_PATH,
-            SHEET_NAME,
+            sheet_name,
             [
                 razon_social,
                 tipo_diagnostico,
                 subtipo_diagnostico,
                 otros_subtipo,
-                "Sí" if se_diagnostico else "No",
+                "Si" if se_diagnostico else "No",
                 fecha_str,
                 hora_str,
             ],
@@ -151,10 +225,10 @@ def diag_form_view(request):
     if not empresas:
         empresas = [
             "Empresa Ejemplo S.A.",
-            "Corporación ABC Ltda.",
+            "Corporacion ABC Ltda.",
             "Inversiones XYZ S.A.S.",
             "Grupo Empresarial 123",
-            "Soluciones Tecnológicas DEF",
+            "Soluciones Tecnologicas DEF",
         ]
 
     return render(request, "diag_form.html", {"empresas": empresas})
@@ -162,9 +236,9 @@ def diag_form_view(request):
 
 @require_http_methods(["GET", "POST"])
 def cap_form_view(request):
-    """Vista para el formulario de capacitación."""
+    """Vista para el formulario de capacitacion."""
     if request.method == "POST":
-        SHEET_NAME = "CAPACITACIONES"
+        sheet_name = "CAPACITACIONES"
 
         razon_social = request.POST.get("razon_social")
         nombre_capacitacion = request.POST.get("nombre_capacitacion")
@@ -178,7 +252,7 @@ def cap_form_view(request):
 
         success = insert_row_to_sheet(
             settings.SHEET_PATH,
-            SHEET_NAME,
+            sheet_name,
             [
                 razon_social,
                 nombre_capacitacion,
@@ -198,23 +272,23 @@ def cap_form_view(request):
     if not empresas:
         empresas = [
             "Empresa Ejemplo S.A.",
-            "Corporación ABC Ltda.",
+            "Corporacion ABC Ltda.",
             "Inversiones XYZ S.A.S.",
             "Grupo Empresarial 123",
-            "Soluciones Tecnológicas DEF",
+            "Soluciones Tecnologicas DEF",
         ]
 
     return render(request, "cap_form.html", {"empresas": empresas})
 
 
 def success_view(request):
-    """Vista de éxito después de enviar el formulario."""
+    """Vista de exito despues de enviar el formulario."""
     return render(request, "success.html")
 
 
 @require_GET
 def success_afiliado_view(request):
-    """Vista de éxito específica para afiliación."""
+    """Vista de exito especifica para afiliacion."""
     return render(request, "success_afiliado.html")
 
 
@@ -255,7 +329,7 @@ def estado_afiliado_view(request):
 
 @require_GET
 def success_estado_afiliado_view(request):
-    """Confirmación de actualización de estado."""
+    """Confirmacion de actualizacion de estado."""
     estado_update = request.session.pop("estado_update", None)
     context = {"estado_update": estado_update}
     return render(request, "success_estado_afiliado.html", context)
@@ -265,65 +339,25 @@ def success_estado_afiliado_view(request):
 def nuevo_afiliado_view(request):
     """Formulario para registrar un nuevo afiliado en la hoja SOCIOS."""
     sectores = _obtener_sectores()
-    context = {"sectores": sectores}
+    form_data = _build_afiliado_form_data(
+        request.POST if request.method == "POST" else None
+    )
+    context = _build_afiliado_form_context(sectores, form_data)
 
     if request.method == "POST":
-        razon_social = request.POST.get("razon_social", "").strip()
-        ruc = request.POST.get("ruc", "").strip()
-        ruc_norm = limpiar_ruc(ruc)
-        ciudad = request.POST.get("ciudad", "").strip()
-        direccion = request.POST.get("direccion", "").strip()
-        telefono = request.POST.get("telefono", "").strip()
-        email = request.POST.get("email", "").strip()
-        representante = request.POST.get("representante", "").strip()
-        cargo = request.POST.get("cargo", "").strip()
-        genero = request.POST.get("genero", "").strip()
-        colaboradores = request.POST.get("colaboradores", "").strip()
-        sector = request.POST.get("sector", "").strip()
-        tamano = request.POST.get("tamano", "").strip()
-        estado = request.POST.get("estado", "").strip()
-
+        ruc_norm = limpiar_ruc(form_data.get("ruc", ""))
         guayaquil = pytz.timezone("America/Guayaquil")
         fecha_afiliacion = now().astimezone(guayaquil).date().isoformat()
 
-        context.update(
-            {
-                "razon_social": razon_social,
-                "ruc": ruc,
-                "ciudad": ciudad,
-                "direccion": direccion,
-                "telefono": telefono,
-                "email": email,
-                "representante": representante,
-                "cargo": cargo,
-                "genero": genero,
-                "colaboradores": colaboradores,
-                "sector_sel": sector,
-                "tamano_sel": tamano,
-                "estado_sel": estado,
-            }
-        )
-
         if len(ruc_norm) != 13:
-            context["ruc_error"] = "RUC inválido. Debe tener 13 dígitos."
+            context["ruc_error"] = "RUC invalido. Debe tener 13 digitos."
         else:
             try:
                 guardar_nuevo_afiliado_en_google_sheets(
                     {
-                        "razon_social": razon_social,
+                        **form_data,
                         "ruc": ruc_norm,
                         "fecha_afiliacion": fecha_afiliacion,
-                        "ciudad": ciudad,
-                        "direccion": direccion,
-                        "telefono": telefono,
-                        "email": email,
-                        "representante": representante,
-                        "cargo": cargo,
-                        "genero": genero,
-                        "colaboradores": colaboradores,
-                        "sector": sector,
-                        "tamano": tamano,
-                        "estado": estado,
                     }
                 )
                 return redirect("forms:success_afiliado")
@@ -336,7 +370,7 @@ def nuevo_afiliado_view(request):
 
 @require_http_methods(["GET", "POST"])
 def ventas_afiliado_view(request):
-    """Formulario para registrar las ventas de un afiliado (búsqueda y envío separados)."""
+    """Formulario para registrar las ventas de un afiliado."""
     ruc_inicial = limpiar_ruc(request.POST.get("ruc", "").strip())
     context = {
         "ventas_data": [_entrada_venta_vacia()],
@@ -373,7 +407,7 @@ def ventas_afiliado_view(request):
                 return render(request, "ventas_afiliado.html", context)
 
             rv_norm = (registro_ventas or "").strip().lower()
-            es_si = rv_norm in {"si", "sí", "s\u00ed", "s"}
+            es_si = rv_norm in {"si", "si", "s\u00ed", "s"}
 
             base_data = {
                 "ruc": ruc_norm,
@@ -393,7 +427,7 @@ def ventas_afiliado_view(request):
                 for bloque in ventas_bloques:
                     anio = (bloque.get("anio") or "").strip()
                     if not anio:
-                        messages.error(request, "Selecciona el año para cada registro de ventas.")
+                        messages.error(request, "Selecciona el ano para cada registro de ventas.")
                         return render(request, "ventas_afiliado.html", context)
 
                     data = {
@@ -420,5 +454,5 @@ def ventas_afiliado_view(request):
 
 @require_GET
 def success_ventas_afiliado_view(request):
-    """Confirmación de registro de ventas."""
+    """Confirmacion de registro de ventas."""
     return render(request, "success_ventas_afiliado.html")
