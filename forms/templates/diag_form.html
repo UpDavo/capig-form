@@ -5,70 +5,72 @@
 {% block content %}
 <div class="content-body">
     <div class="content-actions">
-        <a href="{% url 'forms:dashboard' %}" class="btn-back">← Volver al Dashboard</a>
+        <a href="{% url 'forms:dashboard' %}" class="btn-back">&larr; Volver al Dashboard</a>
     </div>
-    
-    <h2 class="content-title">Asesoría</h2>
-    <p class="content-subtitle">Complete la información requerida</p>
+
+    <h2 class="content-title">Asesoria</h2>
+    <p class="content-subtitle">Complete la informacion requerida</p>
+
+    {% if submit_disabled %}
+    <div class="alert alert-warning" role="alert">
+        No se pudo cargar la lista de empresas desde SOCIOS. Revise la conexion con Google Sheets o la hoja configurada.
+    </div>
+    {% endif %}
+
     <form method="POST" action="{% url 'forms:diag_form' %}" id="diagForm">
         {% csrf_token %}
-        
-        <!-- Razón Social -->
+
         <div class="mb-4">
-            <label for="razon_social" class="form-label">Razón Social <span class="text-danger">*</span></label>
-            <select class="form-select" id="razon_social" name="razon_social" required>
-                <option value="">Seleccione una razón social...</option>
+            <label for="razon_social" class="form-label">Razon Social <span class="text-danger">*</span></label>
+            <select class="form-select" id="razon_social" name="razon_social" required {% if submit_disabled %}disabled{% endif %}>
+                <option value="">{% if empresas %}Seleccione una razon social o busque por RUC...{% else %}No se pudieron cargar empresas desde SOCIOS{% endif %}</option>
                 {% for empresa in empresas %}
-                <option value="{{ empresa }}">{{ empresa }}</option>
+                <option value="{{ empresa.razon_social }}" {% if selected_razon_social == empresa.razon_social %}selected{% endif %}>{{ empresa.razon_social }}{% if empresa.ruc %} - {{ empresa.ruc }}{% endif %}</option>
                 {% endfor %}
             </select>
+            <small class="text-muted">Puede buscar por razon social o por RUC.</small>
         </div>
-        
-        <!-- Tipo de Asesoría -->
+
         <div class="mb-4">
-            <label for="tipo_diagnostico" class="form-label">Tipo de Asesoría <span class="text-danger">*</span></label>
+            <label for="tipo_diagnostico" class="form-label">Tipo de Asesoria <span class="text-danger">*</span></label>
             <select class="form-select" id="tipo_diagnostico" name="tipo_diagnostico" required>
                 <option value="">Seleccione un tipo...</option>
-                <option value="legal">Legal</option>
-                <option value="lean">Lean</option>
-                <option value="estrategia">Estrategia</option>
-                <option value="ambiente">Ambiente</option>
-                <option value="rrhh">RRHH</option>
-                <option value="tributario">Tributario</option>
+                <option value="legal" {% if selected_tipo_diagnostico == "legal" %}selected{% endif %}>Legal</option>
+                <option value="lean" {% if selected_tipo_diagnostico == "lean" %}selected{% endif %}>Lean</option>
+                <option value="estrategia" {% if selected_tipo_diagnostico == "estrategia" %}selected{% endif %}>Estrategia</option>
+                <option value="ambiente" {% if selected_tipo_diagnostico == "ambiente" %}selected{% endif %}>Ambiente</option>
+                <option value="rrhh" {% if selected_tipo_diagnostico == "rrhh" %}selected{% endif %}>RRHH</option>
+                <option value="tributario" {% if selected_tipo_diagnostico == "tributario" %}selected{% endif %}>Tributario</option>
             </select>
         </div>
-        
-        <!-- Subtipo de Asesoría (Solo para Legal) -->
+
         <div class="mb-4" id="subtipo_container" style="display: none;">
-            <label for="subtipo_diagnostico" class="form-label">Subtipo de Asesoría <span class="text-danger">*</span></label>
+            <label for="subtipo_diagnostico" class="form-label">Subtipo de Asesoria <span class="text-danger">*</span></label>
             <select class="form-select" id="subtipo_diagnostico" name="subtipo_diagnostico">
                 <option value="">Seleccione un subtipo...</option>
-                <option value="laboral">Laboral</option>
-                <option value="societario">Societario</option>
-                <option value="propiedad_intelectual">Propiedad Intelectual</option>
-                <option value="otros">Otros</option>
+                <option value="laboral" {% if selected_subtipo_diagnostico == "laboral" %}selected{% endif %}>Laboral</option>
+                <option value="societario" {% if selected_subtipo_diagnostico == "societario" %}selected{% endif %}>Societario</option>
+                <option value="propiedad_intelectual" {% if selected_subtipo_diagnostico == "propiedad_intelectual" %}selected{% endif %}>Propiedad Intelectual</option>
+                <option value="otros" {% if selected_subtipo_diagnostico == "otros" %}selected{% endif %}>Otros</option>
             </select>
         </div>
-        
-        <!-- Campo de texto para "Otros" -->
+
         <div class="mb-4" id="otros_container" style="display: none;">
             <label for="otros_subtipo" class="form-label">Especifique el subtipo <span class="text-danger">*</span></label>
-            <input type="text" class="form-control" id="otros_subtipo" name="otros_subtipo" placeholder="Ingrese el subtipo de asesoría">
+            <input type="text" class="form-control" id="otros_subtipo" name="otros_subtipo" placeholder="Ingrese el subtipo de asesoria" value="{{ otros_subtipo_value }}">
         </div>
-        
-        <!-- Se Asesoró -->
+
         <div class="mb-4">
             <div class="form-check">
-                <input class="form-check-input" type="checkbox" id="se_diagnostico" name="se_diagnostico" value="true">
+                <input class="form-check-input" type="checkbox" id="se_diagnostico" name="se_diagnostico" value="true" {% if se_diagnostico_checked %}checked{% endif %}>
                 <label class="form-check-label" for="se_diagnostico">
-                    Se realizó la asesoría
+                    Se realizo la asesoria
                 </label>
             </div>
         </div>
-        
-        <!-- Botón de Envío -->
+
         <div class="form-actions">
-            <button type="submit" class="btn btn-primary">Enviar Asesoría</button>
+            <button type="submit" class="btn btn-primary" {% if submit_disabled %}disabled{% endif %}>Enviar Asesoria</button>
         </div>
     </form>
 </div>
@@ -77,18 +79,16 @@
 {% block extra_js %}
 <script>
     $(document).ready(function() {
-        // Inicializar Select2
         $('#razon_social').select2({
             theme: 'bootstrap-5',
-            placeholder: 'Buscar razón social...',
+            placeholder: 'Buscar razon social o RUC...',
             allowClear: true,
             width: '100%'
         });
-        
-        // Mostrar/ocultar subtipo según tipo de asesoría
+
         $('#tipo_diagnostico').on('change', function() {
             const tipoSeleccionado = $(this).val();
-            
+
             if (tipoSeleccionado === 'legal') {
                 $('#subtipo_container').slideDown();
                 $('#subtipo_diagnostico').attr('required', true);
@@ -99,11 +99,10 @@
                 $('#otros_subtipo').attr('required', false).val('');
             }
         });
-        
-        // Mostrar/ocultar campo de texto para "Otros"
+
         $('#subtipo_diagnostico').on('change', function() {
             const subtipoSeleccionado = $(this).val();
-            
+
             if (subtipoSeleccionado === 'otros') {
                 $('#otros_container').slideDown();
                 $('#otros_subtipo').attr('required', true);
@@ -112,28 +111,27 @@
                 $('#otros_subtipo').attr('required', false).val('');
             }
         });
-        
-        // Validación del formulario
+
+        $('#tipo_diagnostico').trigger('change');
+        $('#subtipo_diagnostico').trigger('change');
+
         $('#diagForm').on('submit', function(e) {
             const tipoDiagnostico = $('#tipo_diagnostico').val();
             const subtipoDiagnostico = $('#subtipo_diagnostico').val();
             const otrosSubtipo = $('#otros_subtipo').val();
-            
-            // Validar que si es legal, tenga subtipo
+
             if (tipoDiagnostico === 'legal' && !subtipoDiagnostico) {
                 e.preventDefault();
-                alert('Por favor, seleccione un subtipo de asesoría.');
+                alert('Por favor, seleccione un subtipo de asesoria.');
                 return false;
             }
-            
-            // Validar que si seleccionó "otros", tenga el texto
+
             if (subtipoDiagnostico === 'otros' && !otrosSubtipo.trim()) {
                 e.preventDefault();
-                alert('Por favor, especifique el subtipo de asesoría.');
+                alert('Por favor, especifique el subtipo de asesoria.');
                 return false;
             }
-            
-            // Mostrar loader al enviar
+
             $('#globalLoader').addClass('active');
         });
     });

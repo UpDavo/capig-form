@@ -53,32 +53,59 @@
             <div class="card-body">
                 <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
                     <h5 class="card-title mb-0">Contacto de Empresa</h5>
-                    <div class="d-flex flex-wrap gap-2">
-                        <button type="button" id="show-phone-2" class="btn btn-outline-secondary btn-sm {% if show_phone_2 %}d-none{% endif %}">
-                            Agregar telefono 2
-                        </button>
-                        <button type="button" id="show-email-2" class="btn btn-outline-secondary btn-sm {% if show_email_2 %}d-none{% endif %}">
-                            Agregar email 2
-                        </button>
-                    </div>
+                </div>
+                <p class="text-muted small mb-3">
+                    Puedes agregar y eliminar telefonos y emails. Se guardan en orden en las columnas disponibles de SOCIOS.
+                </p>
+
+                <div class="d-flex flex-wrap gap-2 mb-3">
+                    <button type="button" id="add-phone" class="btn btn-outline-secondary btn-sm">
+                        Agregar telefono
+                    </button>
+                    <button type="button" id="add-email" class="btn btn-outline-secondary btn-sm">
+                        Agregar email
+                    </button>
                 </div>
 
-                <div class="row g-3">
-                    <div class="col-md-6">
-                        <label class="form-label">Telefono Empresa 1 <span class="text-danger">*</span></label>
-                        <input type="text" name="telefono_1" class="form-control" value="{{ form_data.telefono_1|default_if_none:'' }}" required>
+                <div class="row g-4">
+                    <div class="col-12">
+                        <div class="d-flex align-items-center justify-content-between mb-2">
+                            <h6 class="mb-0">Telefonos</h6>
+                            <span class="text-muted small">Maximo {{ max_phone_fields }}</span>
+                        </div>
+                        <div class="row g-3" id="telefonos-wrapper" data-max-items="{{ max_phone_fields }}">
+                            {% for telefono in form_data.telefonos %}
+                            <div class="col-md-6 contact-entry" data-kind="telefono">
+                                <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
+                                    <label class="form-label mb-0 contact-label">Telefono {{ forloop.counter }}{% if forloop.first %} <span class="text-danger">*</span>{% endif %}</label>
+                                    <button type="button" class="btn btn-sm btn-outline-danger contact-remove" {% if form_data.telefonos|length == 1 %}style="display:none;"{% endif %}>
+                                        Eliminar
+                                    </button>
+                                </div>
+                                <input type="text" name="telefonos" class="form-control contact-input" value="{{ telefono|default_if_none:'' }}" {% if forloop.first %}required{% endif %}>
+                            </div>
+                            {% endfor %}
+                        </div>
                     </div>
-                    <div class="col-md-6 {% if not show_phone_2 %}d-none{% endif %}" id="telefono-2-wrapper">
-                        <label class="form-label">Telefono Empresa 2</label>
-                        <input type="text" name="telefono_2" class="form-control" value="{{ form_data.telefono_2|default_if_none:'' }}">
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label">Email 1 <span class="text-danger">*</span></label>
-                        <input type="email" name="email_1" class="form-control" value="{{ form_data.email_1|default_if_none:'' }}" required>
-                    </div>
-                    <div class="col-md-6 {% if not show_email_2 %}d-none{% endif %}" id="email-2-wrapper">
-                        <label class="form-label">Email 2</label>
-                        <input type="email" name="email_2" class="form-control" value="{{ form_data.email_2|default_if_none:'' }}">
+
+                    <div class="col-12">
+                        <div class="d-flex align-items-center justify-content-between mb-2">
+                            <h6 class="mb-0">Emails</h6>
+                            <span class="text-muted small">Maximo {{ max_email_fields }}</span>
+                        </div>
+                        <div class="row g-3" id="emails-wrapper" data-max-items="{{ max_email_fields }}">
+                            {% for email in form_data.emails %}
+                            <div class="col-md-6 contact-entry" data-kind="email">
+                                <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
+                                    <label class="form-label mb-0 contact-label">Email {{ forloop.counter }}{% if forloop.first %} <span class="text-danger">*</span>{% endif %}</label>
+                                    <button type="button" class="btn btn-sm btn-outline-danger contact-remove" {% if form_data.emails|length == 1 %}style="display:none;"{% endif %}>
+                                        Eliminar
+                                    </button>
+                                </div>
+                                <input type="email" name="emails" class="form-control contact-input" value="{{ email|default_if_none:'' }}" {% if forloop.first %}required{% endif %}>
+                            </div>
+                            {% endfor %}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -269,9 +296,82 @@
       });
     }
 
-    bindReveal("show-phone-2", "telefono-2-wrapper");
-    bindReveal("show-email-2", "email-2-wrapper");
     bindReveal("show-executive-contacts", "executive-contacts-wrapper");
+
+    function setupRepeater(options) {
+      const wrapper = document.getElementById(options.wrapperId);
+      const addButton = document.getElementById(options.addButtonId);
+      const maxItems = Number(wrapper ? wrapper.dataset.maxItems : 0) || 0;
+
+      if (!wrapper || !addButton) return;
+
+      function createEntry(value) {
+        const entry = document.createElement("div");
+        entry.className = "col-md-6 contact-entry";
+        entry.dataset.kind = options.kind;
+        entry.innerHTML = `
+          <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
+            <label class="form-label mb-0 contact-label"></label>
+            <button type="button" class="btn btn-sm btn-outline-danger contact-remove">Eliminar</button>
+          </div>
+          <input class="form-control contact-input" name="${options.fieldName}" type="${options.inputType}" value="${value || ""}">
+        `;
+        return entry;
+      }
+
+      function refreshState() {
+        const entries = Array.from(wrapper.querySelectorAll(".contact-entry"));
+        entries.forEach((entry, index) => {
+          const label = entry.querySelector(".contact-label");
+          const removeButton = entry.querySelector(".contact-remove");
+          const input = entry.querySelector(".contact-input");
+          const requiredMark = index === 0 ? ' <span class="text-danger">*</span>' : "";
+
+          label.innerHTML = `${options.labelBase} ${index + 1}${requiredMark}`;
+          input.required = index === 0;
+          removeButton.style.display = entries.length > 1 ? "" : "none";
+        });
+
+        addButton.disabled = entries.length >= maxItems;
+        addButton.classList.toggle("d-none", entries.length >= maxItems);
+      }
+
+      addButton.addEventListener("click", function() {
+        const entries = wrapper.querySelectorAll(".contact-entry");
+        if (entries.length >= maxItems) return;
+        wrapper.appendChild(createEntry(""));
+        refreshState();
+      });
+
+      wrapper.addEventListener("click", function(event) {
+        const button = event.target.closest(".contact-remove");
+        if (!button) return;
+        const entry = button.closest(".contact-entry");
+        if (!entry) return;
+        entry.remove();
+        refreshState();
+      });
+
+      refreshState();
+    }
+
+    setupRepeater({
+      wrapperId: "telefonos-wrapper",
+      addButtonId: "add-phone",
+      kind: "telefono",
+      fieldName: "telefonos",
+      inputType: "text",
+      labelBase: "Telefono",
+    });
+
+    setupRepeater({
+      wrapperId: "emails-wrapper",
+      addButtonId: "add-email",
+      kind: "email",
+      fieldName: "emails",
+      inputType: "email",
+      labelBase: "Email",
+    });
 
     $('form').on('submit', function() {
       $('#globalLoader').addClass('active');

@@ -265,6 +265,51 @@ def buscar_afiliado_por_ruc_base_datos(ruc):
     return None
 
 
+def listar_empresas_socias():
+    """
+    Devuelve la lista de empresas registradas en SOCIOS.
+
+    Se usa para poblar selects de formularios operativos sin depender
+    del indice de la hoja ni de columnas fijas.
+    """
+    try:
+        sheet = _get_base_datos_sheet()
+        rows = _get_all_records_flexible(
+            sheet,
+            head=2,
+            required_keys=("RUC", "RAZON_SOCIAL"),
+        )
+    except Exception:
+        logging.exception("No se pudo cargar la lista de empresas desde SOCIOS.")
+        return []
+
+    empresas = {}
+    for row in rows:
+        row_norm = _normalize_row_keys(row)
+        razon_social = str(row_norm.get("RAZON_SOCIAL", "") or "").strip()
+        ruc = limpiar_ruc(row_norm.get("RUC", ""))
+
+        if not razon_social:
+            continue
+
+        dedupe_key = _ruc_compare_key(ruc) or razon_social.casefold()
+        current = empresas.get(dedupe_key)
+        if not current:
+            empresas[dedupe_key] = {
+                "razon_social": razon_social,
+                "ruc": ruc,
+            }
+            continue
+
+        if not current.get("ruc") and ruc:
+            current["ruc"] = ruc
+
+    return sorted(
+        empresas.values(),
+        key=lambda item: item.get("razon_social", "").casefold(),
+    )
+
+
 def obtener_ventas_por_ruc(ruc):
     """Obtiene ventas historicas del afiliado desde VENTAS_SOCIO y, si no hay, desde SOCIOS."""
     ruc_key = _ruc_compare_key(ruc)

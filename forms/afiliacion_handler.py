@@ -1,6 +1,7 @@
 import logging
 import os
 import re
+import unicodedata
 from typing import Dict, List
 
 from django.conf import settings
@@ -14,6 +15,50 @@ from capig_form.services.google_sheets_service import (
 from forms.utils import limpiar_ruc
 
 logger = logging.getLogger(__name__)
+
+PHONE_COLUMN_SEQUENCE = [
+    "TELEFONO_EMPRESA_1",
+    "TELEFONO_EMPRESA_2",
+    "CONTACTO",
+    "CONTACTO_2",
+    "CONTACTO_4",
+    "CONTACTO_6",
+    "CONTACTO_8",
+]
+EMAIL_COLUMN_SEQUENCE = [
+    "EMAIL",
+    "EMAIL2",
+    "COREO_ELSCTRONICO",
+    "COREO_ELSCTRONICO3",
+    "COREO_ELSCTRONICO5",
+    "CORREO",
+    "COREO_ELSCTRONICO9",
+]
+PHONE_OVERRIDE_KEYS = {
+    "CONTACTO": "gerente_general_contacto",
+    "CONTACTO_2": "gerente_fin_contacto",
+    "CONTACTO_4": "gerente_rrhh_contacto",
+    "CONTACTO_6": "gerente_comercial_contacto",
+    "CONTACTO_8": "gerente_produccion_contacto",
+}
+PHONE_COLUMN_ALIASES = {
+    "TELEFONO_EMPRESA_1": ["TELEFONO_EMPRESA", "TELEFONO"],
+    "TELEFONO_EMPRESA_2": ["TELEFONO_2"],
+}
+EMAIL_OVERRIDE_KEYS = {
+    "COREO_ELSCTRONICO": "gerente_general_email",
+    "COREO_ELSCTRONICO3": "gerente_fin_email",
+    "COREO_ELSCTRONICO5": "gerente_rrhh_email",
+    "CORREO": "gerente_comercial_email",
+    "COREO_ELSCTRONICO9": "gerente_produccion_email",
+}
+EMAIL_COLUMN_ALIASES = {
+    "EMAIL2": ["EMAIL_2"],
+    "COREO_ELSCTRONICO": ["CORREO_ELECTRONICO"],
+    "COREO_ELSCTRONICO3": ["CORREO_ELECTRONICO3", "CORREO_ELECTRONICO_3"],
+    "COREO_ELSCTRONICO5": ["CORREO_ELECTRONICO5", "CORREO_ELECTRONICO_5"],
+    "COREO_ELSCTRONICO9": ["CORREO_ELECTRONICO9", "CORREO_ELECTRONICO_9"],
+}
 
 ALT_ID_KEYS = {
     "ID_UNICO",
@@ -36,84 +81,30 @@ COLUMN_TO_DATA_KEY = {
     "FECHA_AFILIACION": "fecha_afiliacion",
     "CIUDAD": "ciudad",
     "DIRECCION": "direccion",
-    "TELEFONO_EMPRESA_1": "telefono_1",
-    "TELEFONO_EMPRESA": "telefono_1",
-    "TELEFONO": "telefono_1",
-    "TELEFONO_EMPRESA_2": "telefono_2",
-    "TELEFONO_2": "telefono_2",
-    "EMAIL": "email_1",
-    "EMAIL2": "email_2",
-    "EMAIL_2": "email_2",
     "ACTIVIDAD": "actividad",
     "NOMBRE_REP_LEGAL": "representante",
     "CARGO": "cargo",
     "NOMBRE_GTE_GRAL": "gerente_general_nombre",
     "GENERO": "genero",
-    "CONTACTO": "gerente_general_contacto",
-    "CORREO_ELECTRONICO": "gerente_general_email",
-    "COREO_ELSCTRONICO": "gerente_general_email",
     "NOMBRE_GTE_FIN": "gerente_fin_nombre",
-    "CONTACTO_2": "gerente_fin_contacto",
-    "CORREO_ELECTRONICO3": "gerente_fin_email",
-    "CORREO_ELECTRONICO_3": "gerente_fin_email",
-    "COREO_ELSCTRONICO3": "gerente_fin_email",
     "NOMBRE_GTE_RRHH": "gerente_rrhh_nombre",
-    "CONTACTO_4": "gerente_rrhh_contacto",
-    "CORREO_ELECTRONICO5": "gerente_rrhh_email",
-    "CORREO_ELECTRONICO_5": "gerente_rrhh_email",
-    "COREO_ELSCTRONICO5": "gerente_rrhh_email",
     "GERENTE_COMERC": "gerente_comercial_nombre",
     "GERENTE_COMERCIAL": "gerente_comercial_nombre",
-    "CONTACTO_6": "gerente_comercial_contacto",
-    "CORREO": "gerente_comercial_email",
     "GERENTE_PRODUCCCION": "gerente_produccion_nombre",
     "GERENTE_PRODUCCION": "gerente_produccion_nombre",
-    "CONTACTO_8": "gerente_produccion_contacto",
-    "CORREO_ELECTRONICO9": "gerente_produccion_email",
-    "CORREO_ELECTRONICO_9": "gerente_produccion_email",
-    "COREO_ELSCTRONICO9": "gerente_produccion_email",
     "SECTOR": "sector",
     "TAMANO": "tamano",
     "TAMANO_EMPRESA": "tamano",
     "ESTADO": "estado",
 }
 
-COLABORADORES_KEYS = {
-    "NO_COLABORADORES",
-    "COLABORADORES",
-    "NUM_COLABORADORES",
-    "NUMERO_COLABORADORES",
-}
-
-TRANSLITERATION = str.maketrans(
-    {
-        "Á": "A",
-        "É": "E",
-        "Í": "I",
-        "Ó": "O",
-        "Ú": "U",
-        "Ü": "U",
-        "Ñ": "N",
-        "À": "A",
-        "È": "E",
-        "Ì": "I",
-        "Ò": "O",
-        "Ù": "U",
-        "Â": "A",
-        "Ê": "E",
-        "Î": "I",
-        "Ô": "O",
-        "Û": "U",
-        "º": "",
-        "°": "",
-    }
-)
+COLABORADORES_KEYS = {"NO_COLABORADORES", "COLABORADORES", "NUM_COLABORADORES", "NUMERO_COLABORADORES"}
 
 
 def _normalize(col: str) -> str:
     """Normaliza el nombre de columna para comparar de forma tolerante."""
-    text = str(col or "").strip().upper()
-    text = text.translate(TRANSLITERATION)
+    text = unicodedata.normalize("NFD", str(col or "").strip().upper())
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
     text = re.sub(r"[^A-Z0-9]+", "_", text)
     text = re.sub(r"_+", "_", text).strip("_")
     return text
@@ -156,6 +147,45 @@ def _next_autoincrement_value(sheet, header_row: int, header: List[str]) -> str:
     return str(max(existing_ids) + 1) if existing_ids else "1"
 
 
+def _clean_list_values(values) -> List[str]:
+    cleaned = []
+    for value in values or []:
+        txt = str(value or "").strip()
+        if txt:
+            cleaned.append(txt)
+    return cleaned
+
+
+def _build_sequence_assignments(payload: Dict[str, str], sequence, overrides, list_field: str) -> Dict[str, str]:
+    assigned: Dict[str, str] = {}
+
+    for column_key, data_key in overrides.items():
+        value = str(payload.get(data_key, "") or "").strip()
+        if value:
+            assigned[column_key] = value
+
+    list_values = _clean_list_values(payload.get(list_field, []))
+    next_index = 0
+    for column_key in sequence:
+        if column_key in assigned:
+            continue
+        if next_index < len(list_values):
+            assigned[column_key] = list_values[next_index]
+            next_index += 1
+        else:
+            assigned[column_key] = ""
+    return assigned
+
+
+def _expand_assignment_aliases(assignments: Dict[str, str], alias_map) -> Dict[str, str]:
+    expanded = dict(assignments)
+    for canonical_key, aliases in alias_map.items():
+        value = assignments.get(canonical_key, "")
+        for alias in aliases:
+            expanded[alias] = value
+    return expanded
+
+
 def _build_fila(header: List[str], data: Dict[str, str]) -> List[str]:
     """
     Construye una fila con la misma cantidad de columnas que la hoja,
@@ -164,10 +194,28 @@ def _build_fila(header: List[str], data: Dict[str, str]) -> List[str]:
     fila = []
     payload = dict(data)
     payload["ruc"] = limpiar_ruc(payload.get("ruc", ""))
+    phone_assignments = _build_sequence_assignments(
+        payload,
+        PHONE_COLUMN_SEQUENCE,
+        PHONE_OVERRIDE_KEYS,
+        "telefonos",
+    )
+    phone_assignments = _expand_assignment_aliases(phone_assignments, PHONE_COLUMN_ALIASES)
+    email_assignments = _build_sequence_assignments(
+        payload,
+        EMAIL_COLUMN_SEQUENCE,
+        EMAIL_OVERRIDE_KEYS,
+        "emails",
+    )
+    email_assignments = _expand_assignment_aliases(email_assignments, EMAIL_COLUMN_ALIASES)
 
     for col in header:
         key = _normalize(col)
-        if key in COLUMN_TO_DATA_KEY:
+        if key in phone_assignments:
+            fila.append(phone_assignments.get(key, ""))
+        elif key in email_assignments:
+            fila.append(email_assignments.get(key, ""))
+        elif key in COLUMN_TO_DATA_KEY:
             fila.append(payload.get(COLUMN_TO_DATA_KEY[key], ""))
         elif key in COLABORADORES_KEYS:
             fila.append(payload.get("colaboradores", ""))
