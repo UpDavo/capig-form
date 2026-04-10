@@ -1,75 +1,78 @@
 {% extends "layout.html" %}
 
-{% block title %}Formulario de Capacitación - CAPIG{% endblock %}
+{% block title %}Formulario de Capacitacion - CAPIG{% endblock %}
 
 {% block content %}
 <div class="content-body">
     <div class="content-actions">
-        <a href="{% url 'forms:dashboard' %}" class="btn-back">← Volver al Dashboard</a>
+        <a href="{% url 'forms:dashboard' %}" class="btn-back">&larr; Volver al Dashboard</a>
     </div>
-    
-    <h2 class="content-title">Capacitación</h2>
-    <p class="content-subtitle">Complete la información de la capacitación</p>
+
+    <h2 class="content-title">Capacitacion</h2>
+    <p class="content-subtitle">Complete la informacion de la capacitacion</p>
+
+    {% if not empresas %}
+    <div class="alert alert-warning" role="alert">
+        No se pudo cargar la lista de empresas desde SOCIOS. Para continuar, ingrese el nombre manualmente.
+    </div>
+    {% endif %}
+
     <form method="POST" action="{% url 'forms:cap_form' %}" id="capForm">
         {% csrf_token %}
-        
-        <!-- Razón Social -->
+
         <div class="mb-4">
-            <label for="razon_social" class="form-label">Razón Social o Nombre <span class="text-danger">*</span></label>
-            
+            <label for="razon_social" class="form-label">Razon Social o Nombre <span class="text-danger">*</span></label>
+
             <div class="form-check mb-2">
-                <input class="form-check-input" type="checkbox" id="no_en_lista" name="no_en_lista">
+                <input class="form-check-input" type="checkbox" id="no_en_lista" name="no_en_lista" {% if no_en_lista_checked or not empresas %}checked{% endif %}>
                 <label class="form-check-label" for="no_en_lista">
-                    ¿No está en la lista?
+                    No esta en la lista
                 </label>
             </div>
-            
-            <select class="form-select" id="razon_social_select" name="razon_social" required>
-                <option value="">Seleccione una razón social...</option>
+
+            <select class="form-select" id="razon_social_select" name="razon_social" required {% if not empresas %}disabled{% endif %}>
+                <option value="">{% if empresas %}Seleccione una razon social o busque por RUC...{% else %}No se pudieron cargar empresas desde SOCIOS{% endif %}</option>
                 {% for empresa in empresas %}
-                <option value="{{ empresa }}">{{ empresa }}</option>
+                <option value="{{ empresa.razon_social }}" {% if selected_razon_social == empresa.razon_social %}selected{% endif %}>{{ empresa.razon_social }}{% if empresa.ruc %} - {{ empresa.ruc }}{% endif %}</option>
                 {% endfor %}
             </select>
-            
-            <input type="text" class="form-control" id="razon_social_input" name="razon_social" placeholder="Escriba la razón social o nombre..." style="display: none;" autocomplete="off">
+
+            <input type="text" class="form-control" id="razon_social_input" name="razon_social" placeholder="Escriba la razon social o nombre..." value="{{ selected_razon_social }}" autocomplete="off" style="display: none;">
+            <small class="text-muted">Puede buscar por razon social o por RUC.</small>
         </div>
-        
-        <!-- Nombre de la Capacitación -->
+
         <div class="mb-4">
-            <label for="nombre_capacitacion" class="form-label">Nombre de la Capacitación <span class="text-danger">*</span></label>
-            <input type="text" class="form-control" id="nombre_capacitacion" name="nombre_capacitacion" placeholder="Ej: Liderazgo Empresarial" required>
+            <label for="nombre_capacitacion" class="form-label">Nombre de la Capacitacion <span class="text-danger">*</span></label>
+            <input type="text" class="form-control" id="nombre_capacitacion" name="nombre_capacitacion" placeholder="Ej: Liderazgo Empresarial" value="{{ nombre_capacitacion_value }}" required>
         </div>
-        
-        <!-- Tipo de Capacitación -->
+
         <div class="mb-4">
-            <label for="tipo_capacitacion" class="form-label">Tipo de Capacitación <span class="text-danger">*</span></label>
+            <label for="tipo_capacitacion" class="form-label">Tipo de Capacitacion <span class="text-danger">*</span></label>
             <select class="form-select" id="tipo_capacitacion" name="tipo_capacitacion" required>
                 <option value="">Seleccione un tipo...</option>
-                <option value="financiera">Financiera</option>
-                <option value="liderazgo">Liderazgo</option>
-                <option value="tecnologia">Tecnología</option>
-                <option value="ventas">Ventas</option>
-                <option value="marketing">Marketing</option>
-                <option value="recursos_humanos">Recursos Humanos</option>
-                <option value="operaciones">Operaciones</option>
-                <option value="legal">Legal</option>
-                <option value="otra">Otra</option>
+                <option value="financiera" {% if tipo_capacitacion_value == "financiera" %}selected{% endif %}>Financiera</option>
+                <option value="liderazgo" {% if tipo_capacitacion_value == "liderazgo" %}selected{% endif %}>Liderazgo</option>
+                <option value="tecnologia" {% if tipo_capacitacion_value == "tecnologia" %}selected{% endif %}>Tecnologia</option>
+                <option value="ventas" {% if tipo_capacitacion_value == "ventas" %}selected{% endif %}>Ventas</option>
+                <option value="marketing" {% if tipo_capacitacion_value == "marketing" %}selected{% endif %}>Marketing</option>
+                <option value="recursos_humanos" {% if tipo_capacitacion_value == "recursos_humanos" %}selected{% endif %}>Recursos Humanos</option>
+                <option value="operaciones" {% if tipo_capacitacion_value == "operaciones" %}selected{% endif %}>Operaciones</option>
+                <option value="legal" {% if tipo_capacitacion_value == "legal" %}selected{% endif %}>Legal</option>
+                <option value="otra" {% if tipo_capacitacion_value == "otra" %}selected{% endif %}>Otra</option>
             </select>
         </div>
-        
-        <!-- Valor del Pago -->
+
         <div class="mb-4">
             <label for="valor_pago" class="form-label">Valor del Pago <span class="text-danger">*</span></label>
             <div class="input-group">
                 <span class="input-group-text">$</span>
-                <input type="number" class="form-control" id="valor_pago" name="valor_pago" placeholder="0.00" step="0.01" min="0" required>
+                <input type="number" class="form-control" id="valor_pago" name="valor_pago" placeholder="0.00" step="0.01" min="0" value="{{ valor_pago_value }}" required>
             </div>
-            <small class="text-muted">Ingrese el monto sin puntos ni comas</small>
+            <small class="text-muted">Ingrese el monto sin puntos ni comas.</small>
         </div>
-        
-        <!-- Botón de Envío -->
+
         <div class="form-actions">
-            <button type="submit" class="btn btn-primary">Enviar Capacitación</button>
+            <button type="submit" class="btn btn-primary">Enviar Capacitacion</button>
         </div>
     </form>
 </div>
@@ -78,47 +81,42 @@
 {% block extra_js %}
 <script>
     $(document).ready(function() {
-        // Inicializar Select2 para razón social
+        const hasEmpresas = {% if empresas %}true{% else %}false{% endif %};
+
         $('#razon_social_select').select2({
             theme: 'bootstrap-5',
-            placeholder: 'Buscar razón social...',
+            placeholder: 'Buscar razon social o RUC...',
             allowClear: true,
             width: '100%'
         });
-        
-        // Manejar el checkbox "No en lista"
+
         $('#no_en_lista').on('change', function() {
             if ($(this).is(':checked')) {
-                // Ocultar select y mostrar input
                 $('#razon_social_select').next('.select2-container').hide();
                 $('#razon_social_select').prop('required', false);
                 $('#razon_social_input').show().prop('required', true);
             } else {
-                // Mostrar select y ocultar input
                 $('#razon_social_select').next('.select2-container').show();
-                $('#razon_social_select').prop('required', true);
-                $('#razon_social_input').hide().prop('required', false).val('');
+                $('#razon_social_select').prop('required', hasEmpresas);
+                $('#razon_social_input').hide().prop('required', false);
             }
         });
-        
-        // Formatear el valor del pago mientras se escribe
+
+        $('#no_en_lista').trigger('change');
+
         $('#valor_pago').on('input', function() {
             let valor = $(this).val();
-            // Asegurar que solo se ingresen números y un punto decimal
             valor = valor.replace(/[^0-9.]/g, '');
-            
-            // Evitar múltiples puntos decimales
+
             const partes = valor.split('.');
             if (partes.length > 2) {
                 valor = partes[0] + '.' + partes.slice(1).join('');
             }
-            
+
             $(this).val(valor);
         });
-        
-        // Validación del formulario
+
         $('#capForm').on('submit', function(e) {
-            // Asegurar que solo el campo activo tenga name="razon_social"
             if ($('#no_en_lista').is(':checked')) {
                 $('#razon_social_select').removeAttr('name');
                 $('#razon_social_input').attr('name', 'razon_social');
@@ -126,23 +124,21 @@
                 $('#razon_social_input').removeAttr('name');
                 $('#razon_social_select').attr('name', 'razon_social');
             }
-            
+
             const valorPago = parseFloat($('#valor_pago').val());
-            
             if (isNaN(valorPago) || valorPago < 0) {
                 e.preventDefault();
-                alert('Por favor, ingrese un valor de pago válido.');
+                alert('Por favor, ingrese un valor de pago valido.');
                 return false;
             }
-            
+
             if (valorPago === 0) {
-                if (!confirm('El valor del pago es $0. ¿Desea continuar?')) {
+                if (!confirm('El valor del pago es $0. Desea continuar?')) {
                     e.preventDefault();
                     return false;
                 }
             }
-            
-            // Mostrar loader al enviar
+
             $('#globalLoader').addClass('active');
         });
     });

@@ -12,7 +12,6 @@ from django.views.decorators.http import require_GET, require_http_methods
 
 from capig_form.services.google_sheets_service import (
     _get_client,
-    get_column_data,
     get_google_sheet,
     insert_row_to_sheet,
 )
@@ -26,6 +25,7 @@ from forms.utils import (
     buscar_afiliado_por_ruc,
     buscar_afiliado_por_ruc_base_datos,
     guardar_ventas_afiliado,
+    listar_empresas_socias,
     limpiar_ruc,
     obtener_ventas_por_ruc,
 )
@@ -171,6 +171,17 @@ def _codigo_seguridad_valido(request):
     return codigo and codigo == getattr(settings, "SECURITY_CODE", "")
 
 
+def _cargar_empresas_socias():
+    """Obtiene empresas desde SOCIOS y un set para validacion rapida."""
+    empresas = listar_empresas_socias()
+    empresas_validas = {
+        (empresa.get("razon_social") or "").strip().casefold()
+        for empresa in empresas
+        if (empresa.get("razon_social") or "").strip()
+    }
+    return empresas, empresas_validas
+
+
 def _to_iso_date(fecha_str: str) -> str:
     """
     Intenta convertir fechas como DD/MM/YYYY o YYYY-MM-DD a YYYY-MM-DD.
@@ -198,97 +209,149 @@ def _to_iso_date(fecha_str: str) -> str:
 @require_http_methods(["GET", "POST"])
 def diag_form_view(request):
     """Vista para el formulario de diagnostico."""
+    empresas, empresas_validas = _cargar_empresas_socias()
+    selected_razon_social = (request.POST.get("razon_social", "") or "").strip()
+
     if request.method == "POST":
         sheet_name = "ASESORIAS"
 
-        razon_social = request.POST.get("razon_social")
+        razon_social = selected_razon_social
         tipo_diagnostico = request.POST.get("tipo_diagnostico")
         subtipo_diagnostico = request.POST.get("subtipo_diagnostico", "")
         otros_subtipo = request.POST.get("otros_subtipo", "")
         se_diagnostico = request.POST.get("se_diagnostico") == "true"
 
-        ecuador_tz = pytz.timezone("America/Guayaquil")
-        now_ecuador = datetime.now(ecuador_tz)
-        fecha_str = now_ecuador.strftime("%Y-%m-%d")
-        hora_str = now_ecuador.strftime("%H:%M:%S")
+        if not empresas:
+            messages.error(
+                request,
+                "No se pudo cargar la lista de empresas socias desde Google Sheets. Revisa la hoja SOCIOS.",
+            )
+        elif razon_social.casefold() not in empresas_validas:
+            messages.error(
+                request,
+                "La empresa seleccionada no pertenece a la lista actual de socios.",
+            )
+        else:
+            ecuador_tz = pytz.timezone("America/Guayaquil")
+            now_ecuador = datetime.now(ecuador_tz)
+            fecha_str = now_ecuador.strftime("%Y-%m-%d")
+            hora_str = now_ecuador.strftime("%H:%M:%S")
 
-        success = insert_row_to_sheet(
-            settings.SHEET_PATH,
-            sheet_name,
-            [
-                razon_social,
-                tipo_diagnostico,
-                subtipo_diagnostico,
-                otros_subtipo,
-                "Si" if se_diagnostico else "No",
-                fecha_str,
-                hora_str,
-            ],
-        )
+            success = insert_row_to_sheet(
+                settings.SHEET_PATH,
+                sheet_name,
+                [
+                    razon_social,
+                    tipo_diagnostico,
+                    subtipo_diagnostico,
+                    otros_subtipo,
+                    "Si" if se_diagnostico else "No",
+                    fecha_str,
+                    hora_str,
+                ],
+            )
 
-        if success:
-            return redirect("forms:success")
-        messages.error(request, "Hubo un error al guardar los datos. Por favor, intente nuevamente.")
+            if success:
+                return redirect("forms:success")
+            messages.error(request, "Hubo un error al guardar los datos. Por favor, intente nuevamente.")
 
-    empresas = get_column_data(settings.SHEET_PATH, worksheet_index=0, column="B", start_row=3)
-
-    if not empresas:
-        empresas = [
-            "Empresa Ejemplo S.A.",
-            "Corporacion ABC Ltda.",
-            "Inversiones XYZ S.A.S.",
-            "Grupo Empresarial 123",
-            "Soluciones Tecnologicas DEF",
-        ]
-
-    return render(request, "diag_form.html", {"empresas": empresas})
+    return render(
+        request,
+        "diag_form.html",
+        {
+            "empresas": empresas,
+            "selected_razon_social": selected_razon_social,
+            "selected_tipo_diagnostico": (request.POST.get("tipo_diagnostico", "") or "").strip(),
+            "selected_subtipo_diagnostico": (request.POST.get("subtipo_diagnostico", "") or "").strip(),
+            "otros_subtipo_value": (request.POST.get("otros_subtipo", "") or "").strip(),
+            "se_diagnostico_checked": request.POST.get("se_diagnostico") == "true",
+            "submit_disabled": not empresas,
+        },
+    )
 
 
 @require_http_methods(["GET", "POST"])
 def cap_form_view(request):
     """Vista para el formulario de capacitacion."""
+    empresas, empresas_validas = _cargar_empresas_socias()
+    razon_social = (request.POST.get("razon_social", "") or "").strip()
+    no_en_lista_checked = request.POST.get("no_en_lista") == "on"
+
     if request.method == "POST":
         sheet_name = "CAPACITACIONES"
 
-        razon_social = request.POST.get("razon_social")
         nombre_capacitacion = request.POST.get("nombre_capacitacion")
         tipo_capacitacion = request.POST.get("tipo_capacitacion")
         valor_pago = request.POST.get("valor_pago")
 
-        ecuador_tz = pytz.timezone("America/Guayaquil")
-        now_ecuador = datetime.now(ecuador_tz)
-        fecha_str = now_ecuador.strftime("%Y-%m-%d")
-        hora_str = now_ecuador.strftime("%H:%M:%S")
+        if not no_en_lista_checked:
+            if not empresas:
+                messages.error(
+                    request,
+                    "No se pudo cargar la lista de empresas socias desde Google Sheets. Marca 'No esta en la lista' solo si corresponde registrar un externo.",
+                )
+            elif razon_social.casefold() not in empresas_validas:
+                messages.error(
+                    request,
+                    "La empresa seleccionada no pertenece a la lista actual de socios.",
+                )
+            else:
+                ecuador_tz = pytz.timezone("America/Guayaquil")
+                now_ecuador = datetime.now(ecuador_tz)
+                fecha_str = now_ecuador.strftime("%Y-%m-%d")
+                hora_str = now_ecuador.strftime("%H:%M:%S")
 
-        success = insert_row_to_sheet(
-            settings.SHEET_PATH,
-            sheet_name,
-            [
-                razon_social,
-                nombre_capacitacion,
-                tipo_capacitacion,
-                valor_pago,
-                fecha_str,
-                hora_str,
-            ],
-        )
+                success = insert_row_to_sheet(
+                    settings.SHEET_PATH,
+                    sheet_name,
+                    [
+                        razon_social,
+                        nombre_capacitacion,
+                        tipo_capacitacion,
+                        valor_pago,
+                        fecha_str,
+                        hora_str,
+                    ],
+                )
 
-        if success:
-            return redirect("forms:success")
-        messages.error(request, "Hubo un error al guardar los datos. Por favor, intente nuevamente.")
+                if success:
+                    return redirect("forms:success")
+                messages.error(request, "Hubo un error al guardar los datos. Por favor, intente nuevamente.")
+        else:
+            ecuador_tz = pytz.timezone("America/Guayaquil")
+            now_ecuador = datetime.now(ecuador_tz)
+            fecha_str = now_ecuador.strftime("%Y-%m-%d")
+            hora_str = now_ecuador.strftime("%H:%M:%S")
 
-    empresas = get_column_data(settings.SHEET_PATH, worksheet_index=0, column="B", start_row=3)
+            success = insert_row_to_sheet(
+                settings.SHEET_PATH,
+                sheet_name,
+                [
+                    razon_social,
+                    nombre_capacitacion,
+                    tipo_capacitacion,
+                    valor_pago,
+                    fecha_str,
+                    hora_str,
+                ],
+            )
 
-    if not empresas:
-        empresas = [
-            "Empresa Ejemplo S.A.",
-            "Corporacion ABC Ltda.",
-            "Inversiones XYZ S.A.S.",
-            "Grupo Empresarial 123",
-            "Soluciones Tecnologicas DEF",
-        ]
+            if success:
+                return redirect("forms:success")
+            messages.error(request, "Hubo un error al guardar los datos. Por favor, intente nuevamente.")
 
-    return render(request, "cap_form.html", {"empresas": empresas})
+    return render(
+        request,
+        "cap_form.html",
+        {
+            "empresas": empresas,
+            "selected_razon_social": razon_social,
+            "no_en_lista_checked": no_en_lista_checked,
+            "nombre_capacitacion_value": (request.POST.get("nombre_capacitacion", "") or "").strip(),
+            "tipo_capacitacion_value": (request.POST.get("tipo_capacitacion", "") or "").strip(),
+            "valor_pago_value": (request.POST.get("valor_pago", "") or "").strip(),
+        },
+    )
 
 
 def success_view(request):
